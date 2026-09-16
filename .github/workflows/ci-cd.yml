@@ -9,6 +9,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ouros-keycloak-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   actions: read
   contents: read
@@ -92,7 +96,7 @@ jobs:
             }
 
   ci:
-    name: ci
+    name: keycloak-iac-validation
     runs-on: ubuntu-latest
     if: github.event.action != 'labeled' || github.event.label.name == 'rerun-ci'
 
@@ -100,14 +104,61 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate repository
+      - name: Install validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck jq
+
+      - name: Validate required repository files
         run: |
           test -f README.md
+          test -f Dockerfile
+          test -f discloud.config
+          test -f realm/ouros-realm.json
+          test -f iac/validate.sh
+          test -f iac/sync-clients.sh
+          test -f scripts/keycloak-entrypoint.sh
+
+      - name: Check Bash syntax
+        run: |
+          bash -n iac/validate.sh
+          bash -n iac/sync-clients.sh
+          bash -n scripts/keycloak-entrypoint.sh
+          bash -n ci/keycloak-integration.sh
+
+      - name: Run ShellCheck
+        run: |
+          shellcheck iac/validate.sh
+          shellcheck iac/sync-clients.sh
+          shellcheck scripts/keycloak-entrypoint.sh
+          shellcheck ci/keycloak-integration.sh
+
+      - name: Validate realm, Discloud and client declarations
+        run: bash iac/validate.sh
+
+      - name: Ensure tracked configuration contains no obvious secrets
+        run: |
+          if grep -RniE '(password|secret|token)="[^".][^"]+"' iac/resources iac/examples iac/test-fixtures; then
+            echo "Tracked IaC files must not contain credentials or client secrets."
+            exit 1
+          fi
+
+  keycloak-integration:
+    name: keycloak-iac-integration
+    runs-on: ubuntu-latest
+    needs: ci
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run PostgreSQL + Keycloak integration suite
+        run: bash ci/keycloak-integration.sh
 
   sonarcloud:
     name: sonarcloud
     runs-on: ubuntu-latest
-    needs: ci
+    needs: [ci, keycloak-integration]
 
     steps:
       - name: Checkout
