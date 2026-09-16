@@ -51,14 +51,8 @@ csv_id_for_value() {
   local output="$1"
   local expected="$2"
   local first second
-  local header=true
 
   while IFS=',' read -r first second; do
-    if [[ "${header}" == true ]]; then
-      header=false
-      continue
-    fi
-
     first="${first%$'\r'}"
     second="${second%$'\r'}"
     if [[ "${second}" == "${expected}" ]]; then
