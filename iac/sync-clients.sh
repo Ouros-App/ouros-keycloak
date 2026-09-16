@@ -93,10 +93,10 @@ upsert_base_client() {
   if [[ -z "${client_uuid}" ]]; then
     "${KCADM}" create clients -r "${REALM}" -s "clientId=${client_id}" "${settings[@]}" >/dev/null
     client_uuid="$(csv_lookup_id clients clientId "${client_id}")"
-    echo "[keycloak-iac] created client ${client_id}"
+    echo "[keycloak-iac] created client ${client_id}" >&2
   else
     "${KCADM}" update "clients/${client_uuid}" -r "${REALM}" "${settings[@]}" >/dev/null
-    echo "[keycloak-iac] updated client ${client_id}"
+    echo "[keycloak-iac] updated client ${client_id}" >&2
   fi
 
   if [[ -z "${client_uuid}" ]]; then
@@ -120,7 +120,7 @@ ensure_audience_scope() {
       -s "name=${scope_name}" \
       -s protocol=openid-connect >/dev/null
     scope_uuid="$(csv_lookup_id client-scopes name "${scope_name}")"
-    echo "[keycloak-iac] created client scope ${scope_name}"
+    echo "[keycloak-iac] created client scope ${scope_name}" >&2
   fi
 
   if [[ -z "${scope_uuid}" ]]; then
@@ -145,10 +145,10 @@ ensure_audience_scope() {
 
   if [[ -z "${mapper_uuid}" ]]; then
     "${KCADM}" create "client-scopes/${scope_uuid}/protocol-mappers/models" -r "${REALM}" "${mapper_settings[@]}" >/dev/null
-    echo "[keycloak-iac] created audience mapper ${mapper_name}"
+    echo "[keycloak-iac] created audience mapper ${mapper_name}" >&2
   else
     "${KCADM}" update "client-scopes/${scope_uuid}/protocol-mappers/models/${mapper_uuid}" -r "${REALM}" "${mapper_settings[@]}" >/dev/null
-    echo "[keycloak-iac] updated audience mapper ${mapper_name}"
+    echo "[keycloak-iac] updated audience mapper ${mapper_name}" >&2
   fi
 
   printf '%s' "${scope_uuid}"
