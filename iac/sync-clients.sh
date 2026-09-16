@@ -50,10 +50,10 @@ config_get() {
 csv_id_for_value() {
   local output="$1"
   local expected="$2"
-  local id candidate remainder
+  local id candidate
   local header=true
 
-  while IFS=',' read -r id candidate remainder; do
+  while IFS=',' read -r id candidate; do
     if [[ "${header}" == true ]]; then
       header=false
       continue
