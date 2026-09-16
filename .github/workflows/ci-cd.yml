@@ -118,6 +118,15 @@ jobs:
           test -f iac/validate.sh
           test -f iac/sync-clients.sh
           test -f scripts/keycloak-entrypoint.sh
+          test -f ci/keycloak-integration.sh
+          test -f iac/examples/microservice.conf.example
+          test -f iac/examples/mobile.conf.example
+          test -f iac/examples/web.conf.example
+          test -f iac/examples/service.conf.example
+          test -f iac/test-fixtures/ci-api.conf
+          test -f iac/test-fixtures/ci-mobile.conf
+          test -f iac/test-fixtures/ci-web.conf
+          test -f iac/test-fixtures/ci-service.conf
 
       - name: Check Bash syntax
         run: |
@@ -152,7 +161,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run PostgreSQL + Keycloak integration suite
+      - name: Run PostgreSQL + Keycloak integration suite for all client profiles
         run: bash ci/keycloak-integration.sh
 
   sonarcloud:
