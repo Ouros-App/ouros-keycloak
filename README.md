@@ -32,7 +32,19 @@ O realm `ouros` é importado automaticamente no primeiro boot e contém as roles
 - `company_employee`
 - `admin`
 
-Clientes OIDC e secrets não são versionados neste repositório. Eles devem ser criados/configurados no Keycloak e os segredos devem ficar apenas no ambiente da Discloud/secret manager.
+Clientes OIDC e segredos não são versionados neste repositório. Eles devem ser criados/configurados no Keycloak e os segredos devem ficar apenas no ambiente da Discloud ou em um gerenciador de segredos.
+
+### Contrato OIDC do piloto
+
+O primeiro resource server do piloto é o `ms-telemetry-dashboard-service`.
+
+- client id esperado pelo serviço: `ms-telemetry-dashboard-service`
+- audience esperada no access token: `ms-telemetry-dashboard-service`
+- issuer esperado: `https://<host-publico>/realms/ouros`
+
+No Keycloak, configure um client scope chamado `telemetry-audience` com um **Audience Protocol Mapper** adicionando `ms-telemetry-dashboard-service` ao claim `aud`. Associe esse client scope aos clients que emitirão access tokens usados para chamar o telemetry service. O serviço deve validar explicitamente `iss`, `exp`, assinatura e `aud`.
+
+O client scope não contém segredo e pode ser criado manualmente no console durante o piloto. Client secrets, quando existirem, permanecem fora do repositório.
 
 ## Variáveis de ambiente
 
@@ -42,12 +54,14 @@ Configure na Discloud:
 KC_BOOTSTRAP_ADMIN_USERNAME=...
 KC_BOOTSTRAP_ADMIN_PASSWORD=...
 KC_HOSTNAME=https://ouros-keycloak.discloud.app
-KC_DB_URL=jdbc:postgresql://HOST:5432/keycloak
+KC_DB_URL=jdbc:postgresql://keycloak-db:5432/keycloak
 KC_DB_USERNAME=keycloak
-KC_DB_PASSWORD=...
+KCRAW_DB_PASSWORD=...
 ```
 
 O banco do Keycloak deve ser dedicado à identidade. Ele não deve usar as tabelas do banco de produção do Ouros.
+
+Para a senha do PostgreSQL, prefira `KCRAW_DB_PASSWORD`. Esse formato preserva valores literais, inclusive senhas contendo `$`, `$$` ou `${...}`. Não defina `KC_DB_PASSWORD` e `KCRAW_DB_PASSWORD` ao mesmo tempo, pois o Keycloak rejeita configurações duplicadas para a mesma chave.
 
 ## Fluxo do piloto
 
@@ -79,6 +93,9 @@ Durante o piloto, o login legado permanece funcionando e nenhuma coluna `passwor
 
 - nunca commitar credenciais reais;
 - usar PostgreSQL separado para o Keycloak;
+- manter o PostgreSQL acessível apenas pela VLAN privada da Discloud;
 - expor o Keycloak somente por HTTPS;
+- executar o container do Keycloak como usuário não-root;
 - validar JWT localmente nos serviços usando as chaves públicas/JWKS do realm;
+- validar `issuer`, `audience` e expiração antes de confiar nos claims;
 - não confiar em `user_id` enviado pelo cliente quando o `sub` autenticado puder ser usado.
