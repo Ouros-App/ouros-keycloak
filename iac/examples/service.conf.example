@@ -1,0 +1,4 @@
+# Confidential machine-to-machine client using Client Credentials.
+CLIENT_TYPE="service"
+CLIENT_ID="ouros-worker"
+AUDIENCES="ms-example-api"
