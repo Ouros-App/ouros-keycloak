@@ -36,9 +36,27 @@ on_error() {
 }
 trap on_error ERR
 
+jwt_payload() {
+  local token="$1"
+  local segment padding
+
+  segment="$(cut -d. -f2 <<< "${token}")"
+  segment="${segment//-/+}"
+  segment="${segment//_/\/}"
+
+  case $(( ${#segment} % 4 )) in
+    2) padding='==' ;;
+    3) padding='=' ;;
+    *) padding='' ;;
+  esac
+
+  printf '%s%s' "${segment}" "${padding}" | base64 --decode
+}
+
 command -v docker >/dev/null 2>&1 || { echo "docker is required" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
+command -v base64 >/dev/null 2>&1 || { echo "base64 is required" >&2; exit 1; }
 
 echo "[integration] building Keycloak image"
 docker build -t "${IMAGE}" .
@@ -126,14 +144,17 @@ kcadm_get() {
 api_json="$(kcadm_get clients -r ouros -q clientId=ci-api)"
 mobile_json="$(kcadm_get clients -r ouros -q clientId=ci-mobile)"
 web_json="$(kcadm_get clients -r ouros -q clientId=ci-web)"
+service_json="$(kcadm_get clients -r ouros -q clientId=ci-service)"
 
-jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == false and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false' <<< "${api_json}" >/dev/null
-jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == true and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].attributes["pkce.code.challenge.method"] == "S256" and (.[0].redirectUris | index("com.ouros.ci:/oauth2redirect") != null)' <<< "${mobile_json}" >/dev/null
-jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == true and .[0].attributes["pkce.code.challenge.method"] == "S256" and (.[0].redirectUris | index("https://ci.example.invalid/*") != null) and (.[0].webOrigins | index("https://ci.example.invalid") != null)' <<< "${web_json}" >/dev/null
+jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == false and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == false' <<< "${api_json}" >/dev/null
+jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == true and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == false and .[0].attributes["pkce.code.challenge.method"] == "S256" and (.[0].redirectUris | index("com.ouros.ci:/oauth2redirect") != null)' <<< "${mobile_json}" >/dev/null
+jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == true and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == false and .[0].attributes["pkce.code.challenge.method"] == "S256" and (.[0].redirectUris | index("https://ci.example.invalid/*") != null) and (.[0].webOrigins | index("https://ci.example.invalid") != null)' <<< "${web_json}" >/dev/null
+jq -e 'length == 1 and .[0].publicClient == false and .[0].standardFlowEnabled == false and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == true and .[0].clientAuthenticatorType == "client-secret"' <<< "${service_json}" >/dev/null
 
 api_uuid="$(jq -r '.[0].id' <<< "${api_json}")"
 mobile_uuid="$(jq -r '.[0].id' <<< "${mobile_json}")"
 web_uuid="$(jq -r '.[0].id' <<< "${web_json}")"
+service_uuid="$(jq -r '.[0].id' <<< "${service_json}")"
 
 scope_json="$(kcadm_get client-scopes -r ouros)"
 scope_uuid="$(jq -r '.[] | select(.name == "ci-api-audience") | .id' <<< "${scope_json}")"
@@ -144,11 +165,31 @@ jq -e '.[] | select(.name == "ci-api-audience" and .protocolMapper == "oidc-audi
 
 mobile_scopes="$(kcadm_get "clients/${mobile_uuid}/default-client-scopes" -r ouros)"
 web_scopes="$(kcadm_get "clients/${web_uuid}/default-client-scopes" -r ouros)"
+service_scopes="$(kcadm_get "clients/${service_uuid}/default-client-scopes" -r ouros)"
 api_scopes="$(kcadm_get "clients/${api_uuid}/default-client-scopes" -r ouros)"
 
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${mobile_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${web_scopes}" >/dev/null
+jq -e '.[] | select(.name == "ci-api-audience")' <<< "${service_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${api_scopes}" >/dev/null
+
+echo "[integration] verifying Client Credentials service identity"
+service_secret="$(kcadm_get "clients/${service_uuid}/client-secret" -r ouros | jq -r '.value')"
+[[ -n "${service_secret}" && "${service_secret}" != null ]] \
+  || { echo "[integration] service client secret missing" >&2; exit 1; }
+
+service_token_json="$(curl -fsS \
+  -u "ci-service:${service_secret}" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'grant_type=client_credentials' \
+  "http://localhost:${HOST_PORT}/realms/ouros/protocol/openid-connect/token")"
+service_access_token="$(jq -r '.access_token' <<< "${service_token_json}")"
+[[ -n "${service_access_token}" && "${service_access_token}" != null ]] \
+  || { echo "[integration] service access token missing" >&2; exit 1; }
+
+service_payload="$(jwt_payload "${service_access_token}")"
+jq -e '(.sub | type) == "string" and (if (.aud | type) == "array" then (.aud | index("ci-api")) != null else .aud == "ci-api" end)' \
+  <<< "${service_payload}" >/dev/null
 
 echo "[integration] verifying idempotent reconciliation"
 docker exec "${KEYCLOAK_CONTAINER}" /bin/bash /opt/keycloak/iac/sync-clients.sh >/dev/null
@@ -156,4 +197,4 @@ docker exec "${KEYCLOAK_CONTAINER}" /bin/bash /opt/keycloak/iac/sync-clients.sh 
 curl -fsS "http://localhost:${HOST_PORT}/realms/ouros/protocol/openid-connect/certs" \
   | jq -e '.keys | length > 0' >/dev/null
 
-echo "[integration] microservice, mobile and web IaC reconciliation passed"
+echo "[integration] microservice, mobile, web and service IaC reconciliation passed"
