@@ -112,7 +112,7 @@ Um mobile, web ou service client que declare:
 AUDIENCES="ms-telemetry-dashboard-service"
 ```
 
-recebe `ms-telemetry-dashboard-audience` como default client scope. Nos tokens emitidos para esse client, a audience do telemetry passa a aparecer no claim `aud`.
+recebe `ms-telemetry-dashboard-audience` como default client scope. No access token emitido para esse client, a audience do telemetry passa a aparecer no claim `aud`.
 
 ## Service secrets
 
