@@ -46,7 +46,7 @@ validate_redirects() {
   for item in "${items[@]}"; do
     case "${client_type}" in
       web)
-        [[ "${item}" == https://* || "${item}" == http://localhost* || "${item}" == http://127.0.0.1* ]] \
+        [[ "${item}" == https://* || "${item}" =~ ^http://(localhost|127\.0\.0\.1)(:[0-9]+)?([/?#].*)?$ ]] \
           || fail "${file}: web REDIRECT_URIS must use HTTPS (localhost HTTP is allowed)"
         ;;
       mobile)
@@ -67,7 +67,7 @@ validate_web_origins() {
   IFS='|' read -r -a items <<< "${raw}"
   for item in "${items[@]}"; do
     [[ "${item}" != *'*'* ]] || fail "${file}: WEB_ORIGINS cannot contain wildcards"
-    [[ "${item}" == https://* || "${item}" == http://localhost* || "${item}" == http://127.0.0.1* ]] \
+    [[ "${item}" == https://* || "${item}" =~ ^http://(localhost|127\.0\.0\.1)(:[0-9]+)?$ ]] \
       || fail "${file}: WEB_ORIGINS must use HTTPS (localhost HTTP is allowed)"
   done
 }
