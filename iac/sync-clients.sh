@@ -121,6 +121,11 @@ ensure_audience_scope() {
       -s protocol=openid-connect >/dev/null
     scope_uuid="$(csv_lookup_id client-scopes name "${scope_name}")"
     echo "[keycloak-iac] created client scope ${scope_name}" >&2
+  else
+    "${KCADM}" update "client-scopes/${scope_uuid}" -r "${REALM}" \
+      -s "name=${scope_name}" \
+      -s protocol=openid-connect >/dev/null
+    echo "[keycloak-iac] updated client scope ${scope_name}" >&2
   fi
 
   if [[ -z "${scope_uuid}" ]]; then
@@ -157,7 +162,9 @@ ensure_audience_scope() {
 attach_default_scope() {
   local client_uuid="$1"
   local scope_uuid="$2"
-  "${KCADM}" update "clients/${client_uuid}/default-client-scopes/${scope_uuid}" -r "${REALM}" >/dev/null
+  # This sub-resource supports PUT but not GET, so kcadm must skip its usual
+  # read-before-update merge behavior.
+  "${KCADM}" update "clients/${client_uuid}/default-client-scopes/${scope_uuid}" -r "${REALM}" -n >/dev/null
 }
 
 scope_name_for_audience() {
