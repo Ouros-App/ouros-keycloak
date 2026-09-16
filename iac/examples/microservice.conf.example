@@ -1,0 +1,5 @@
+CLIENT_TYPE="microservice"
+CLIENT_ID="ms-example-api"
+AUDIENCE="ms-example-api"
+SCOPE_NAME="ms-example-api-audience"
+MAPPER_NAME="ms-example-api-audience"
