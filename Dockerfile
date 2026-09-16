@@ -8,8 +8,8 @@ RUN /opt/keycloak/bin/kc.sh build
 
 FROM quay.io/keycloak/keycloak:26.7.3
 
-COPY --from=builder /opt/keycloak/ /opt/keycloak/
-COPY realm/ /opt/keycloak/data/import/
+COPY --from=builder --chown=1000:0 /opt/keycloak/ /opt/keycloak/
+COPY --chown=1000:0 realm/ /opt/keycloak/data/import/
 
 ENV KC_DB=postgres
 ENV KC_HTTP_ENABLED=true
@@ -19,6 +19,8 @@ ENV KC_HEALTH_ENABLED=true
 ENV KC_METRICS_ENABLED=true
 
 EXPOSE 8080
+
+USER 1000
 
 ENTRYPOINT ["/opt/keycloak/bin/kc.sh"]
 CMD ["start", "--optimized", "--import-realm"]
