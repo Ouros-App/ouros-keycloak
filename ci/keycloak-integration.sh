@@ -19,12 +19,12 @@ trap cleanup EXIT
 
 print_keycloak_logs() {
   echo "[integration] Keycloak logs:" >&2
-  docker logs "${KEYCLOAK_CONTAINER}" >&2 2>/dev/null || true
+  docker logs "${KEYCLOAK_CONTAINER}" >&2 2>&1 || true
 }
 
 print_keycloak_state() {
   docker inspect "${KEYCLOAK_CONTAINER}" \
-    --format='[integration] exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' >&2 2>/dev/null || true
+    --format='[integration] exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' >&2 2>&1 || true
 }
 
 on_error() {
