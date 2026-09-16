@@ -30,20 +30,24 @@ export HOME="/tmp/keycloak-iac"
 mkdir -p "${HOME}/.keycloak"
 chmod 700 "${HOME}" "${HOME}/.keycloak"
 
+# kcadm supports KC_CLI_PASSWORD, which avoids exposing the password in argv.
+export KC_CLI_PASSWORD="${IAC_ADMIN_PASSWORD}"
+
 attempt=1
 max_attempts=60
 until /opt/keycloak/bin/kcadm.sh config credentials \
   --server http://127.0.0.1:8080 \
   --realm master \
-  --user "${IAC_ADMIN_USERNAME}" \
-  --password "${IAC_ADMIN_PASSWORD}" >/dev/null 2>&1; do
+  --user "${IAC_ADMIN_USERNAME}" >/dev/null 2>&1; do
   if ! kill -0 "${KEYCLOAK_PID}" 2>/dev/null; then
+    unset KC_CLI_PASSWORD
     echo "[keycloak-iac] Keycloak exited before the IaC reconciliation could run"
     wait "${KEYCLOAK_PID}" || true
     exit 1
   fi
 
   if (( attempt >= max_attempts )); then
+    unset KC_CLI_PASSWORD
     echo "[keycloak-iac] timed out waiting for the Keycloak Admin API"
     shutdown_keycloak
     exit 1
@@ -52,6 +56,8 @@ until /opt/keycloak/bin/kcadm.sh config credentials \
   sleep 2
   ((attempt += 1))
 done
+
+unset KC_CLI_PASSWORD
 
 echo "[keycloak-iac] Admin API ready; reconciling managed resources"
 bash /opt/keycloak/iac/sync-clients.sh
