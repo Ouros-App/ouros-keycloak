@@ -1,22 +1,32 @@
 # ouros-keycloak
 
-Infraestrutura de identidade centralizada do Ouros usando Keycloak.
+<!-- REPO-METADATA:START -->
+<div align="center">
 
-## Objetivo atual
+[![Repo Size](https://img.shields.io/github/repo-size/Ouros-App/ouros-keycloak?style=flat-square&label=REPO%20SIZE)](https://github.com/Ouros-App/ouros-keycloak)
+[![Languages](https://img.shields.io/github/languages/count/Ouros-App/ouros-keycloak?style=flat-square&label=LANGUAGES)](https://github.com/Ouros-App/ouros-keycloak/languages)
+[![Forks](https://img.shields.io/github/forks/Ouros-App/ouros-keycloak?style=flat-square&label=FORKS)](https://github.com/Ouros-App/ouros-keycloak/network/members)
+[![Issues](https://img.shields.io/github/issues/Ouros-App/ouros-keycloak?style=flat-square&label=ISSUES)](https://github.com/Ouros-App/ouros-keycloak/issues)
+[![Pull Requests](https://img.shields.io/github/issues-pr/Ouros-App/ouros-keycloak?style=flat-square&label=PULL%20REQUESTS)](https://github.com/Ouros-App/ouros-keycloak/pulls)
 
-Este repositório publica o Keycloak em `https://ouros-keycloak.discloud.app` para fornecer OIDC/JWKS de forma estável aos serviços do Ouros, enquanto o PostgreSQL do Keycloak permanece acessível apenas pela VLAN privada da Discloud.
+</div>
+<!-- REPO-METADATA:END -->
 
-O cliente/mobile não precisa usar endpoints administrativos do Keycloak. O `ms-auth-service` continua sendo o ponto de entrada da aplicação para login e gerenciamento de identidade, enquanto os demais serviços podem validar JWT diretamente usando os endpoints públicos do realm.
+Infraestrutura de identidade do Ouros baseada em Keycloak, PostgreSQL e configuração de clients como código.
 
-## Stack
+## Status e escopo
 
-- Keycloak 26.7.3
-- PostgreSQL dedicado ao Keycloak
-- Deploy na Discloud via Dockerfile
-- Realm inicial: `ouros`
-- URL pública: `https://ouros-keycloak.discloud.app`
-- Banco acessível pela VLAN privada da Discloud
-- clients/resource servers gerenciados como código via `kcadm.sh`
+O repositório atualmente mantém:
+
+- Keycloak 26.7.3 em produção na Discloud;
+- realm `ouros` com as roles `farm_owner`, `company_employee` e `admin`;
+- PostgreSQL dedicado ao Keycloak na VLAN privada da Discloud;
+- endpoint público OIDC/JWKS em `https://ouros-keycloak.discloud.app`;
+- clients Keycloak reconciliados como Infrastructure as Code no startup;
+- três perfis de client: `microservice`, `mobile` e `web`;
+- configuração inicial do `ms-telemetry-dashboard-service` versionada no IaC.
+
+O `ms-auth-service` é o ponto de entrada planejado para o fluxo de autenticação da aplicação. Resource servers validam JWT localmente usando issuer, audience e JWKS do realm.
 
 ## Topologia
 
@@ -27,7 +37,7 @@ Mobile / Web
     v
 ms-auth-service
     |
-    | HTTPS / OIDC
+    | OIDC
     v
 https://ouros-keycloak.discloud.app
     |
@@ -35,105 +45,220 @@ https://ouros-keycloak.discloud.app
     v
 keycloak-db:5432
 
-Telemetry / Spring / MCP
+Microservices
     |
-    | HTTPS / JWKS
+    | JWKS / OIDC metadata
     v
 https://ouros-keycloak.discloud.app
 ```
 
-O Keycloak é publicado como `TYPE=site` e usa `ID=ouros-keycloak`, mas continua com `VLAN=true` para alcançar o banco privado `keycloak-db`. A VLAN não impede a rota pública do site; ela é usada para a comunicação interna com o PostgreSQL.
+A aplicação Keycloak é publicada como `TYPE=site`, enquanto `VLAN=true` permite acesso ao PostgreSQL privado `keycloak-db`.
 
-## Estrutura
+## Principais componentes
 
-```text
-.
-├── Dockerfile
-├── discloud.config
-├── .env.example
-├── iac/
-│   ├── README.md
-│   ├── sync-clients.sh
-│   └── resources/
-│       └── ms-telemetry-dashboard-service.conf
-├── scripts/
-│   └── keycloak-entrypoint.sh
-└── realm/
-    └── ouros-realm.json
-```
+- `Dockerfile`: imagem otimizada do Keycloak e entrypoint do reconciliador IaC.
+- `realm/ouros-realm.json`: bootstrap do realm e roles iniciais.
+- `scripts/keycloak-entrypoint.sh`: inicia o Keycloak, aguarda a Admin API e executa a reconciliação.
+- `iac/sync-clients.sh`: cria e atualiza clients, scopes e audience mappers via `kcadm.sh`.
+- `iac/resources/`: fonte de verdade dos clients gerenciados em produção.
+- `iac/examples/`: exemplos dos tipos suportados.
+- `iac/test-fixtures/`: fixtures usadas nos testes de integração da CI.
+- `iac/validate.sh`: validação estática das declarações e configuração de deploy.
+- `discloud.config`: configuração da aplicação na Discloud.
 
-## Realm inicial
+## Pré-requisitos
 
-O realm `ouros` é importado automaticamente no primeiro boot e contém as roles iniciais:
+Para executar ou publicar o projeto são necessários:
 
-- `farm_owner`
-- `company_employee`
-- `admin`
+- Docker para build/testes locais;
+- PostgreSQL dedicado ao Keycloak;
+- aplicação e banco com acesso à VLAN da Discloud;
+- credenciais administrativas permanentes para o reconciliador IaC após o bootstrap inicial.
 
-## Clients as Code
+## Instalação e configuração
 
-Os clients das APIs não precisam mais ser cadastrados manualmente no Admin Console. No startup, o container sobe o Keycloak, aguarda a Admin API local e executa o reconciliador em `iac/sync-clients.sh`.
+Use `.env.example` como referência. As principais variáveis são:
 
-Cada API gerenciada possui um arquivo declarativo em `iac/resources/`. Exemplo:
+| Variável | Uso |
+| --- | --- |
+| `KC_BOOTSTRAP_ADMIN_USERNAME` / `KC_BOOTSTRAP_ADMIN_PASSWORD` | Criação do administrador temporário no primeiro bootstrap. |
+| `KC_IAC_ADMIN_USERNAME` / `KC_IAC_ADMIN_PASSWORD` | Administrador permanente usado pelo reconciliador no startup. |
+| `KC_IAC_REALM` | Realm gerenciado pelo IaC; padrão esperado: `ouros`. |
+| `KC_HOSTNAME` | URL pública do Keycloak. |
+| `KC_DB_URL` | JDBC URL do PostgreSQL dedicado. |
+| `KC_DB_USERNAME` | Usuário do PostgreSQL. |
+| `KCRAW_DB_PASSWORD` | Senha do PostgreSQL preservando caracteres literais como `$`. |
 
-```bash
-CLIENT_ID="ms-example-api"
-AUDIENCE="ms-example-api"
-SCOPE_NAME="ms-example-api-audience"
-MAPPER_NAME="ms-example-api-audience"
-```
-
-O deploy cria ou atualiza automaticamente:
-
-- o client OIDC da API com flows de login desativados;
-- o client scope de audience;
-- o Audience Protocol Mapper;
-- o vínculo do scope como default no client.
-
-Para adicionar uma nova API ao Keycloak, adicione o arquivo em `iac/resources/`, abra uma PR e redeploye após o merge. O processo é idempotente e não remove clients automaticamente quando um arquivo é apagado, evitando exclusões acidentais.
-
-A configuração atual do `ms-telemetry-dashboard-service` já está versionada em `iac/resources/ms-telemetry-dashboard-service.conf`. Mais detalhes estão em [`iac/README.md`](iac/README.md).
-
-### Contrato OIDC do telemetry
-
-- client id: `ms-telemetry-dashboard-service`
-- audience no access token: `ms-telemetry-dashboard-service`
-- issuer: `https://ouros-keycloak.discloud.app/realms/ouros`
-
-O resource server deve validar explicitamente assinatura/JWKS, `iss`, `exp` e `aud`.
-
-> O client que efetivamente obtiver o token do usuário também precisará receber/solicitar o audience scope adequado conforme o fluxo final do `ms-auth-service`. `client_credentials` continua representando identidade de serviço, não de usuário.
-
-## Variáveis de ambiente
-
-Configure na Discloud:
+Exemplo de produção:
 
 ```env
 KC_BOOTSTRAP_ADMIN_USERNAME=...
 KC_BOOTSTRAP_ADMIN_PASSWORD=...
-
 KC_IAC_ADMIN_USERNAME=...
 KC_IAC_ADMIN_PASSWORD=...
 KC_IAC_REALM=ouros
-
 KC_HOSTNAME=https://ouros-keycloak.discloud.app
 KC_DB_URL=jdbc:postgresql://keycloak-db:5432/keycloak
 KC_DB_USERNAME=keycloak
 KCRAW_DB_PASSWORD=...
 ```
 
-`KC_IAC_ADMIN_USERNAME` e `KC_IAC_ADMIN_PASSWORD` devem apontar para um administrador permanente usado pelo reconciliador. No primeiro rollout, o script aceita as credenciais bootstrap como fallback para facilitar a migração, mas as credenciais permanentes devem ser configuradas antes da remoção do temporary admin.
+Não configure `KC_DB_PASSWORD` junto de `KCRAW_DB_PASSWORD`.
 
-O banco do Keycloak deve ser dedicado à identidade e permanecer acessível apenas pela VLAN da Discloud.
+## Clients as Code
 
-Para a senha do PostgreSQL, prefira `KCRAW_DB_PASSWORD`. Esse formato preserva valores literais, inclusive senhas contendo `$`, `$$` ou `${...}`. Não defina `KC_DB_PASSWORD` e `KCRAW_DB_PASSWORD` ao mesmo tempo.
+Cada client gerenciado é um arquivo `.conf` em `iac/resources/`. Alterar a configuração de identidade passa por PR, CI e redeploy.
+
+| Tipo | Uso | Fluxos |
+| --- | --- | --- |
+| `microservice` | API/resource server | login desativado; cria audience scope + mapper |
+| `mobile` | aplicativo nativo | Authorization Code + PKCE S256 |
+| `web` | frontend web/SPA | Authorization Code + PKCE S256 + web origins explícitas |
+
+Exemplo de microserviço:
+
+```bash
+CLIENT_TYPE="microservice"
+CLIENT_ID="ms-example-api"
+AUDIENCE="ms-example-api"
+SCOPE_NAME="ms-example-api-audience"
+MAPPER_NAME="ms-example-api-audience"
+```
+
+Exemplo mobile:
+
+```bash
+CLIENT_TYPE="mobile"
+CLIENT_ID="ouros-mobile"
+REDIRECT_URIS="com.ouros.app:/oauth2redirect"
+AUDIENCES="ms-example-api|ms-another-api"
+```
+
+Exemplo web:
+
+```bash
+CLIENT_TYPE="web"
+CLIENT_ID="ouros-web"
+REDIRECT_URIS="https://app.example.com/*"
+WEB_ORIGINS="https://app.example.com"
+AUDIENCES="ms-example-api|ms-another-api"
+```
+
+`AUDIENCES` só pode apontar para audiences declaradas por clients `microservice`. Valores múltiplos usam `|` como separador.
+
+O reconciliador é idempotente e não destrutivo: remover um arquivo do Git não apaga automaticamente o client já existente no Keycloak. Consulte [`iac/README.md`](iac/README.md) para o contrato completo.
+
+## Deploy
+
+A Discloud usa:
+
+```ini
+NAME=Ouros Keycloak
+ID=ouros-keycloak
+TYPE=site
+MAIN=Dockerfile
+RAM=2048
+VERSION=latest
+AUTORESTART=true
+VLAN=true
+```
+
+No startup, o container executa a sequência:
+
+```text
+Keycloak
+  -> aguarda Admin API
+  -> autentica kcadm
+  -> reconcilia iac/resources/*.conf
+  -> mantém o processo principal ativo
+```
+
+Para adicionar ou alterar um client em produção, abra uma PR alterando `iac/resources/`, aguarde a CI e redeploye a aplicação após o merge.
+
+## Endpoints OIDC
+
+Issuer:
+
+```text
+https://ouros-keycloak.discloud.app/realms/ouros
+```
+
+Discovery:
+
+```text
+https://ouros-keycloak.discloud.app/realms/ouros/.well-known/openid-configuration
+```
+
+JWKS:
+
+```text
+https://ouros-keycloak.discloud.app/realms/ouros/protocol/openid-connect/certs
+```
+
+Resource servers devem validar assinatura, `iss`, `exp` e `aud` antes de confiar nos claims.
+
+## Testes e qualidade
+
+Validação local:
+
+```bash
+bash iac/validate.sh
+shellcheck iac/*.sh scripts/*.sh
+docker build -t ouros-keycloak:test .
+```
+
+A CI valida:
+
+- sintaxe Bash e ShellCheck;
+- `realm/ouros-realm.json`;
+- contrato do `discloud.config`;
+- schema das declarações IaC;
+- duplicidade de IDs e audiences;
+- referências `AUDIENCES` entre aplicações e microserviços;
+- build real do Dockerfile;
+- integração PostgreSQL + Keycloak;
+- reconciliação dos tipos `microservice`, `mobile` e `web`;
+- PKCE S256, redirect URIs, web origins e audience scopes;
+- SonarCloud e CodeQL.
+
+## Estrutura do projeto
+
+```text
+.
+├── .github/workflows/ci-cd.yml
+├── Dockerfile
+├── discloud.config
+├── realm/
+│   └── ouros-realm.json
+├── scripts/
+│   └── keycloak-entrypoint.sh
+└── iac/
+    ├── README.md
+    ├── validate.sh
+    ├── sync-clients.sh
+    ├── resources/
+    │   └── ms-telemetry-dashboard-service.conf
+    ├── examples/
+    │   ├── microservice.conf.example
+    │   ├── mobile.conf.example
+    │   └── web.conf.example
+    └── test-fixtures/
+        ├── ci-api.conf
+        ├── ci-mobile.conf
+        └── ci-web.conf
+```
 
 ## Segurança
 
-- nunca commitar credenciais reais;
-- manter o PostgreSQL do Keycloak somente na VLAN privada;
-- usar HTTPS para todos os acessos públicos ao Keycloak;
-- manter credenciais administrativas restritas ao `ms-auth-service`, ao reconciliador IaC e aos operadores autorizados;
-- executar o container do Keycloak como usuário não-root;
-- validar assinatura, `iss`, `aud` e expiração dos JWTs;
-- não confiar em `user_id` enviado pelo cliente quando o `sub` autenticado puder ser usado.
+- credenciais e client secrets nunca devem ser commitados;
+- PostgreSQL permanece somente na VLAN privada;
+- acessos públicos ao Keycloak usam HTTPS;
+- mobile e web são public clients com PKCE, sem client secret;
+- Direct Access Grants e Implicit Flow permanecem desativados;
+- a sessão administrativa do `kcadm` fica apenas em `/tmp/keycloak-iac`;
+- `client_credentials` representa identidade de serviço e não deve ser tratado como identidade de usuário;
+- IDs de usuário usados pelas APIs devem vir do `sub` de um JWT validado.
+
+## Licença
+
+Este projeto está sob a licença MIT, conforme o arquivo [LICENSE](LICENSE).
