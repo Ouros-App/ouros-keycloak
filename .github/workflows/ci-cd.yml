@@ -95,7 +95,7 @@ jobs:
               core.warning(`Could not publish the Conventional Commits comment: ${error.message}`);
             }
 
-  ci:
+  validation:
     name: keycloak-iac-validation
     runs-on: ubuntu-latest
     if: github.event.action != 'labeled' || github.event.label.name == 'rerun-ci'
@@ -155,7 +155,7 @@ jobs:
   keycloak-integration:
     name: keycloak-iac-integration
     runs-on: ubuntu-latest
-    needs: ci
+    needs: validation
 
     steps:
       - name: Checkout
@@ -167,7 +167,7 @@ jobs:
   sonarcloud:
     name: sonarcloud
     runs-on: ubuntu-latest
-    needs: [ci, keycloak-integration]
+    needs: [validation, keycloak-integration]
 
     steps:
       - name: Checkout
@@ -219,7 +219,7 @@ jobs:
   codeql:
     name: codeql
     runs-on: ubuntu-latest
-    needs: ci
+    needs: validation
 
     steps:
       - name: Checkout
@@ -234,3 +234,27 @@ jobs:
 
       - name: Analyze with CodeQL
         uses: github/codeql-action/analyze@v3
+
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    needs: [validation, keycloak-integration, sonarcloud, codeql]
+    if: always()
+
+    steps:
+      - name: Verify required pipeline jobs
+        env:
+          VALIDATION_RESULT: ${{ needs.validation.result }}
+          INTEGRATION_RESULT: ${{ needs.keycloak-integration.result }}
+          SONARCLOUD_RESULT: ${{ needs.sonarcloud.result }}
+          CODEQL_RESULT: ${{ needs.codeql.result }}
+        run: |
+          echo "validation=${VALIDATION_RESULT}"
+          echo "integration=${INTEGRATION_RESULT}"
+          echo "sonarcloud=${SONARCLOUD_RESULT}"
+          echo "codeql=${CODEQL_RESULT}"
+
+          test "${VALIDATION_RESULT}" = "success"
+          test "${INTEGRATION_RESULT}" = "success"
+          test "${SONARCLOUD_RESULT}" = "success"
+          test "${CODEQL_RESULT}" = "success"
