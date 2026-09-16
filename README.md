@@ -23,7 +23,7 @@ O repositório atualmente mantém:
 - PostgreSQL dedicado ao Keycloak na VLAN privada da Discloud;
 - endpoint público OIDC/JWKS em `https://ouros-keycloak.discloud.app`;
 - clients Keycloak reconciliados como Infrastructure as Code no startup;
-- três perfis de client: `microservice`, `mobile` e `web`;
+- quatro perfis de client: `microservice`, `mobile`, `web` e `service`;
 - configuração inicial do `ms-telemetry-dashboard-service` versionada no IaC.
 
 O `ms-auth-service` é o ponto de entrada planejado para o fluxo de autenticação da aplicação. Resource servers validam JWT localmente usando issuer, audience e JWKS do realm.
@@ -48,6 +48,12 @@ keycloak-db:5432
 Microservices
     |
     | JWKS / OIDC metadata
+    v
+https://ouros-keycloak.discloud.app
+
+Workers / automações
+    |
+    | Client Credentials
     v
 https://ouros-keycloak.discloud.app
 ```
@@ -114,6 +120,7 @@ Cada client gerenciado é um arquivo `.conf` em `iac/resources/`. Alterar a conf
 | `microservice` | API/resource server | login desativado; cria audience scope + mapper |
 | `mobile` | aplicativo nativo | Authorization Code + PKCE S256 |
 | `web` | frontend web/SPA | Authorization Code + PKCE S256 + web origins explícitas |
+| `service` | worker, cron, integração ou automação M2M | client confidencial + service account + Client Credentials |
 
 Exemplo de microserviço:
 
@@ -144,7 +151,15 @@ WEB_ORIGINS="https://app.example.com"
 AUDIENCES="ms-example-api|ms-another-api"
 ```
 
-`AUDIENCES` só pode apontar para audiences declaradas por clients `microservice`. Valores múltiplos usam `|` como separador.
+Exemplo service:
+
+```bash
+CLIENT_TYPE="service"
+CLIENT_ID="ouros-worker"
+AUDIENCES="ms-example-api|ms-another-api"
+```
+
+Clients `service` são confidenciais. O Keycloak gera e mantém o client secret; ele não é versionado no repositório. `AUDIENCES` de `mobile`, `web` e `service` só pode apontar para audiences declaradas por clients `microservice`. Valores múltiplos usam `|` como separador.
 
 O reconciliador é idempotente e não destrutivo: remover um arquivo do Git não apaga automaticamente o client já existente no Keycloak. Consulte [`iac/README.md`](iac/README.md) para o contrato completo.
 
@@ -203,7 +218,7 @@ Validação local:
 
 ```bash
 bash iac/validate.sh
-shellcheck iac/*.sh scripts/*.sh
+shellcheck iac/*.sh scripts/*.sh ci/*.sh
 docker build -t ouros-keycloak:test .
 ```
 
@@ -213,12 +228,17 @@ A CI valida:
 - `realm/ouros-realm.json`;
 - contrato do `discloud.config`;
 - schema das declarações IaC;
-- duplicidade de IDs e audiences;
-- referências `AUDIENCES` entre aplicações e microserviços;
+- duplicidade de IDs, audiences e scope names;
+- referências `AUDIENCES` entre aplicações/services e microserviços;
+- regras de redirect URI e web origins;
+- ausência de secrets versionados;
 - build real do Dockerfile;
 - integração PostgreSQL + Keycloak;
-- reconciliação dos tipos `microservice`, `mobile` e `web`;
+- reconciliação dos tipos `microservice`, `mobile`, `web` e `service`;
 - PKCE S256, redirect URIs, web origins e audience scopes;
+- fluxo real `client_credentials` e audience do token de `service`;
+- idempotência da reconciliação;
+- disponibilidade do JWKS;
 - SonarCloud e CodeQL.
 
 ## Estrutura do projeto
@@ -232,6 +252,8 @@ A CI valida:
 │   └── ouros-realm.json
 ├── scripts/
 │   └── keycloak-entrypoint.sh
+├── ci/
+│   └── keycloak-integration.sh
 └── iac/
     ├── README.md
     ├── validate.sh
@@ -241,11 +263,13 @@ A CI valida:
     ├── examples/
     │   ├── microservice.conf.example
     │   ├── mobile.conf.example
-    │   └── web.conf.example
+    │   ├── web.conf.example
+    │   └── service.conf.example
     └── test-fixtures/
         ├── ci-api.conf
         ├── ci-mobile.conf
-        └── ci-web.conf
+        ├── ci-web.conf
+        └── ci-service.conf
 ```
 
 ## Segurança
@@ -254,10 +278,11 @@ A CI valida:
 - PostgreSQL permanece somente na VLAN privada;
 - acessos públicos ao Keycloak usam HTTPS;
 - mobile e web são public clients com PKCE, sem client secret;
+- services são confidential clients, com secret gerado pelo Keycloak e service account habilitada;
 - Direct Access Grants e Implicit Flow permanecem desativados;
 - a sessão administrativa do `kcadm` fica apenas em `/tmp/keycloak-iac`;
-- `client_credentials` representa identidade de serviço e não deve ser tratado como identidade de usuário;
-- IDs de usuário usados pelas APIs devem vir do `sub` de um JWT validado.
+- `client_credentials` representa identidade de serviço e nunca identidade de usuário;
+- IDs de usuário usados pelas APIs devem vir do `sub` de um JWT de usuário validado.
 
 ## Licença
 
