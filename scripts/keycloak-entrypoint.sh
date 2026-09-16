@@ -30,6 +30,10 @@ export HOME="/tmp/keycloak-iac"
 mkdir -p "${HOME}/.keycloak"
 chmod 700 "${HOME}" "${HOME}/.keycloak"
 
+# kcadm starts a separate JVM for each invocation. Keep that helper JVM small so
+# reconciliation stays well inside the same 2 GiB container budget as Keycloak.
+export KC_OPTS="${KC_IAC_CLI_JAVA_OPTS:--Xms32m -Xmx192m}"
+
 # kcadm supports KC_CLI_PASSWORD, which avoids exposing the password in argv.
 export KC_CLI_PASSWORD="${IAC_ADMIN_PASSWORD}"
 
