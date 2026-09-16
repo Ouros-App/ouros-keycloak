@@ -55,6 +55,13 @@ csv_id_for_value() {
   while IFS=',' read -r first second; do
     first="${first%$'\r'}"
     second="${second%$'\r'}"
+
+    # kcadm may emit a header such as id,clientId. Never treat the column
+    # names as data, while still allowing a legitimate value such as CLIENT_ID=id.
+    if [[ "${first}" == "id" ]]; then
+      continue
+    fi
+
     if [[ "${second}" == "${expected}" ]]; then
       printf '%s' "${first}"
       return 0
