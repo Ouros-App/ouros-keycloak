@@ -1,0 +1,5 @@
+CLIENT_TYPE="web"
+CLIENT_ID="ouros-web"
+REDIRECT_URIS="https://app.example.com/*"
+WEB_ORIGINS="https://app.example.com"
+AUDIENCES="ms-example-api"
