@@ -17,15 +17,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-log_keycloak_on_error() {
+on_error() {
   local status=$?
-  if (( status != 0 )); then
-    echo "[integration] Keycloak logs:" >&2
-    docker logs "${KEYCLOAK_CONTAINER}" >&2 2>/dev/null || true
-  fi
-  return "${status}"
+  trap - ERR
+  echo "[integration] Keycloak logs:" >&2
+  docker logs "${KEYCLOAK_CONTAINER}" >&2 2>/dev/null || true
+  exit "${status}"
 }
-trap log_keycloak_on_error ERR
+trap on_error ERR
 
 command -v docker >/dev/null 2>&1 || { echo "docker is required" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
@@ -51,8 +50,8 @@ for _ in $(seq 1 45); do
     break
   fi
   sleep 1
-docker inspect "${POSTGRES_CONTAINER}" --format '{{.State.Running}}' | grep -qx true \
-  || { echo "[integration] PostgreSQL exited unexpectedly" >&2; exit 1; }
+  docker inspect "${POSTGRES_CONTAINER}" --format '{{.State.Running}}' | grep -qx true \
+    || { echo "[integration] PostgreSQL exited unexpectedly" >&2; exit 1; }
 done
 
 docker exec "${POSTGRES_CONTAINER}" pg_isready -U keycloak -d keycloak >/dev/null
@@ -76,18 +75,19 @@ docker run -d \
 
 ready=false
 for _ in $(seq 1 90); do
-  if curl -fsS "http://localhost:${HOST_PORT}/realms/ouros/.well-known/openid-configuration" >/dev/null 2>&1; then
+  if curl -fsS "http://localhost:${HOST_PORT}/realms/ouros/.well-known/openid-configuration" >/dev/null 2>&1 \
+    && docker logs "${KEYCLOAK_CONTAINER}" 2>&1 | grep -q '\[keycloak-iac\] reconciliation complete'; then
     ready=true
     break
   fi
   if ! docker inspect "${KEYCLOAK_CONTAINER}" --format '{{.State.Running}}' 2>/dev/null | grep -qx true; then
-    echo "[integration] Keycloak exited before becoming ready" >&2
+    echo "[integration] Keycloak exited before IaC reconciliation completed" >&2
     exit 1
   fi
   sleep 2
 done
 
-[[ "${ready}" == true ]] || { echo "[integration] Keycloak readiness timed out" >&2; exit 1; }
+[[ "${ready}" == true ]] || { echo "[integration] Keycloak/IaC readiness timed out" >&2; exit 1; }
 
 echo "[integration] authenticating verifier"
 docker exec -e HOME=/tmp/ci-verify "${KEYCLOAK_CONTAINER}" /bin/bash -lc \
@@ -109,8 +109,8 @@ mobile_json="$(kcadm_get clients -r ouros -q clientId=ci-mobile)"
 web_json="$(kcadm_get clients -r ouros -q clientId=ci-web)"
 
 jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == false and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false' <<< "${api_json}" >/dev/null
-jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == true and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].attributes["pkce.code.challenge.method"] == "S256" and (. [0].redirectUris | index("com.ouros.ci:/oauth2redirect") != null)' <<< "${mobile_json}" >/dev/null
-jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == true and .[0].attributes["pkce.code.challenge.method"] == "S256" and (. [0].redirectUris | index("https://ci.example.invalid/*") != null) and (. [0].webOrigins | index("https://ci.example.invalid") != null)' <<< "${web_json}" >/dev/null
+jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == true and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].attributes["pkce.code.challenge.method"] == "S256" and (.[0].redirectUris | index("com.ouros.ci:/oauth2redirect") != null)' <<< "${mobile_json}" >/dev/null
+jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == true and .[0].attributes["pkce.code.challenge.method"] == "S256" and (.[0].redirectUris | index("https://ci.example.invalid/*") != null) and (.[0].webOrigins | index("https://ci.example.invalid") != null)' <<< "${web_json}" >/dev/null
 
 api_uuid="$(jq -r '.[0].id' <<< "${api_json}")"
 mobile_uuid="$(jq -r '.[0].id' <<< "${mobile_json}")"
