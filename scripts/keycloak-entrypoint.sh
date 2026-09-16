@@ -54,7 +54,7 @@ until /opt/keycloak/bin/kcadm.sh config credentials \
 done
 
 echo "[keycloak-iac] Admin API ready; reconciling managed resources"
-/opt/keycloak/iac/sync-clients.sh
+bash /opt/keycloak/iac/sync-clients.sh
 
 echo "[keycloak-iac] reconciliation complete"
 wait "${KEYCLOAK_PID}"
