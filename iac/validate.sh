@@ -34,6 +34,44 @@ validate_pipe_list() {
   [[ "${value}" != *'||'* ]] || fail "${file}: ${key} contains an empty item"
 }
 
+validate_redirects() {
+  local file="$1"
+  local client_type="$2"
+  local raw="$3"
+  local item
+  local -a items=()
+
+  [[ -n "${raw}" ]] || return 0
+  IFS='|' read -r -a items <<< "${raw}"
+  for item in "${items[@]}"; do
+    case "${client_type}" in
+      web)
+        [[ "${item}" == https://* || "${item}" == http://localhost* || "${item}" == http://127.0.0.1* ]] \
+          || fail "${file}: web REDIRECT_URIS must use HTTPS (localhost HTTP is allowed)"
+        ;;
+      mobile)
+        [[ "${item}" =~ ^[A-Za-z][A-Za-z0-9+.-]*:/ ]] \
+          || fail "${file}: mobile REDIRECT_URIS must use an absolute URI/custom scheme"
+        ;;
+    esac
+  done
+}
+
+validate_web_origins() {
+  local file="$1"
+  local raw="$2"
+  local item
+  local -a items=()
+
+  [[ -n "${raw}" ]] || return 0
+  IFS='|' read -r -a items <<< "${raw}"
+  for item in "${items[@]}"; do
+    [[ "${item}" != *'*'* ]] || fail "${file}: WEB_ORIGINS cannot contain wildcards"
+    [[ "${item}" == https://* || "${item}" == http://localhost* || "${item}" == http://127.0.0.1* ]] \
+      || fail "${file}: WEB_ORIGINS must use HTTPS (localhost HTTP is allowed)"
+  done
+}
+
 validate_file_shape() {
   local file="$1"
   local line key
@@ -67,6 +105,7 @@ validate_group() {
   local -a audience_items=()
   local -A client_ids=()
   local -A managed_audiences=()
+  local -A scope_names=()
 
   while IFS= read -r file; do
     files+=("${file}")
@@ -94,23 +133,30 @@ validate_group() {
     validate_pipe_list "${file}" REDIRECT_URIS "${redirect_uris}"
     validate_pipe_list "${file}" WEB_ORIGINS "${web_origins}"
     validate_pipe_list "${file}" AUDIENCES "${audiences}"
+    validate_redirects "${file}" "${client_type}" "${redirect_uris}"
 
     case "${client_type}" in
       microservice)
         [[ -z "${redirect_uris}" && -z "${web_origins}" && -z "${audiences}" ]] \
           || fail "${file}: microservice clients cannot declare REDIRECT_URIS, WEB_ORIGINS or AUDIENCES"
         [[ "${audience}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || fail "${file}: invalid AUDIENCE '${audience}'"
+        [[ -n "${scope_name}" ]] || scope_name="${client_id}-audience"
+        [[ -n "${mapper_name}" ]] || mapper_name="${scope_name}"
         [[ -z "${managed_audiences[${audience}]:-}" ]] || fail "${label}: duplicate AUDIENCE ${audience}"
+        [[ -z "${scope_names[${scope_name}]:-}" ]] || fail "${label}: duplicate SCOPE_NAME ${scope_name}"
         managed_audiences["${audience}"]="${file}"
+        scope_names["${scope_name}"]="${file}"
         ;;
       mobile)
         [[ -n "${redirect_uris}" ]] || fail "${file}: mobile clients require REDIRECT_URIS"
+        [[ -z "${web_origins}" ]] || fail "${file}: mobile clients cannot declare WEB_ORIGINS"
         [[ -z "${scope_name}" && -z "${mapper_name}" && "$(config_get "${file}" AUDIENCE)" == "" ]] \
           || fail "${file}: mobile clients cannot declare AUDIENCE, SCOPE_NAME or MAPPER_NAME"
         ;;
       web)
         [[ -n "${redirect_uris}" ]] || fail "${file}: web clients require REDIRECT_URIS"
         [[ -n "${web_origins}" ]] || fail "${file}: web clients require WEB_ORIGINS"
+        validate_web_origins "${file}" "${web_origins}"
         [[ -z "${scope_name}" && -z "${mapper_name}" && "$(config_get "${file}" AUDIENCE)" == "" ]] \
           || fail "${file}: web clients cannot declare AUDIENCE, SCOPE_NAME or MAPPER_NAME"
         ;;
