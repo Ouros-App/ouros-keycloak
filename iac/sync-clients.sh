@@ -30,17 +30,44 @@ config_get() {
   local file="$1"
   local key="$2"
   local default_value="${3:-}"
-  local line
+  local line value=""
+  local found=false
 
-  line="$(grep -E "^${key}=\".*\"$" "${file}" | tail -n 1 || true)"
-  if [[ -z "${line}" ]]; then
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${line}" =~ ^${key}=\"([^\"]*)\"$ ]]; then
+      value="${BASH_REMATCH[1]}"
+      found=true
+    fi
+  done < "${file}"
+
+  if [[ "${found}" == true ]]; then
+    printf '%s' "${value}"
+  else
     printf '%s' "${default_value}"
-    return
   fi
+}
 
-  line="${line#*=\"}"
-  line="${line%\"}"
-  printf '%s' "${line}"
+csv_id_for_value() {
+  local output="$1"
+  local expected="$2"
+  local id candidate remainder
+  local header=true
+
+  while IFS=',' read -r id candidate remainder; do
+    if [[ "${header}" == true ]]; then
+      header=false
+      continue
+    fi
+
+    id="${id%$'\r'}"
+    candidate="${candidate%$'\r'}"
+    if [[ "${candidate}" == "${expected}" ]]; then
+      printf '%s' "${id}"
+      return 0
+    fi
+  done <<< "${output}"
+
+  return 0
 }
 
 csv_lookup_id() {
@@ -50,8 +77,7 @@ csv_lookup_id() {
   local output
 
   output="$(kcadm_run get "${endpoint}" -r "${REALM}" --fields id,"${field}" --format csv --noquotes)"
-  printf '%s\n' "${output}" \
-    | awk -F, -v expected="${value}" 'NR > 1 && $2 == expected { print $1; exit }'
+  csv_id_for_value "${output}" "${value}"
 }
 
 json_array_from_pipe() {
@@ -163,8 +189,7 @@ ensure_audience_scope() {
 
   mapper_output="$(kcadm_run get "client-scopes/${scope_uuid}/protocol-mappers/models" -r "${REALM}" \
     --fields id,name --format csv --noquotes)"
-  mapper_uuid="$(printf '%s\n' "${mapper_output}" \
-    | awk -F, -v expected="${mapper_name}" 'NR > 1 && $2 == expected { print $1; exit }')"
+  mapper_uuid="$(csv_id_for_value "${mapper_output}" "${mapper_name}")"
 
   local -a mapper_settings=(
     -s "name=${mapper_name}"
