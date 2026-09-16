@@ -14,6 +14,7 @@ COPY --chown=1000:0 realm/ /opt/keycloak/data/import/
 ENV KC_DB=postgres
 ENV KC_HTTP_ENABLED=true
 ENV KC_HTTP_PORT=8080
+ENV KC_PROXY_HEADERS=xforwarded
 ENV KC_HEALTH_ENABLED=true
 ENV KC_METRICS_ENABLED=true
 
