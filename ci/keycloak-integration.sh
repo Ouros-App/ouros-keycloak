@@ -22,9 +22,15 @@ print_keycloak_logs() {
   docker logs "${KEYCLOAK_CONTAINER}" >&2 2>/dev/null || true
 }
 
+print_keycloak_state() {
+  docker inspect "${KEYCLOAK_CONTAINER}" \
+    --format='[integration] exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' >&2 2>/dev/null || true
+}
+
 on_error() {
   local status=$?
   trap - ERR
+  print_keycloak_state
   print_keycloak_logs
   exit "${status}"
 }
@@ -42,6 +48,7 @@ docker network create "${NETWORK}" >/dev/null
 echo "[integration] starting PostgreSQL"
 docker run -d \
   --name "${POSTGRES_CONTAINER}" \
+  --memory 512m \
   --network "${NETWORK}" \
   --network-alias keycloak-db \
   -e POSTGRES_DB=keycloak \
@@ -63,6 +70,7 @@ docker exec "${POSTGRES_CONTAINER}" pg_isready -U keycloak -d keycloak >/dev/nul
 echo "[integration] starting Keycloak with all client types"
 docker run -d \
   --name "${KEYCLOAK_CONTAINER}" \
+  --memory 2048m \
   --network "${NETWORK}" \
   -p "${HOST_PORT}:8080" \
   -e KC_BOOTSTRAP_ADMIN_USERNAME="${ADMIN_USER}" \
@@ -86,6 +94,7 @@ for _ in $(seq 1 90); do
   fi
   if ! docker inspect "${KEYCLOAK_CONTAINER}" --format '{{.State.Running}}' 2>/dev/null | grep -qx true; then
     echo "[integration] Keycloak exited before IaC reconciliation completed" >&2
+    print_keycloak_state
     print_keycloak_logs
     exit 1
   fi
@@ -94,6 +103,7 @@ done
 
 if [[ "${ready}" != true ]]; then
   echo "[integration] Keycloak/IaC readiness timed out" >&2
+  print_keycloak_state
   print_keycloak_logs
   exit 1
 fi
