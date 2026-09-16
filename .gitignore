@@ -1,0 +1,14 @@
+# Environment
+.env
+.env.*
+
+# Build artifacts
+dist/
+build/
+tmp/
+temp/
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/
