@@ -24,4 +24,4 @@ EXPOSE 8080
 
 USER 1000
 
-ENTRYPOINT ["/opt/keycloak/scripts/keycloak-entrypoint.sh"]
+ENTRYPOINT ["/bin/bash", "/opt/keycloak/scripts/keycloak-entrypoint.sh"]
