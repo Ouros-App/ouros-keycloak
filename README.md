@@ -16,6 +16,7 @@ O cliente/mobile não precisa usar endpoints administrativos do Keycloak. O `ms-
 - Realm inicial: `ouros`
 - URL pública: `https://ouros-keycloak.discloud.app`
 - Banco acessível pela VLAN privada da Discloud
+- clients/resource servers gerenciados como código via `kcadm.sh`
 
 ## Topologia
 
@@ -50,6 +51,13 @@ O Keycloak é publicado como `TYPE=site` e usa `ID=ouros-keycloak`, mas continua
 ├── Dockerfile
 ├── discloud.config
 ├── .env.example
+├── iac/
+│   ├── README.md
+│   ├── sync-clients.sh
+│   └── resources/
+│       └── ms-telemetry-dashboard-service.conf
+├── scripts/
+│   └── keycloak-entrypoint.sh
 └── realm/
     └── ouros-realm.json
 ```
@@ -62,17 +70,39 @@ O realm `ouros` é importado automaticamente no primeiro boot e contém as roles
 - `company_employee`
 - `admin`
 
-Clientes OIDC e segredos não são versionados neste repositório. Eles devem ser criados/configurados no Keycloak e os segredos devem ficar apenas no ambiente da Discloud ou em um gerenciador de segredos.
+## Clients as Code
 
-### Contrato OIDC do piloto
+Os clients das APIs não precisam mais ser cadastrados manualmente no Admin Console. No startup, o container sobe o Keycloak, aguarda a Admin API local e executa o reconciliador em `iac/sync-clients.sh`.
 
-O primeiro resource server do piloto é o `ms-telemetry-dashboard-service`.
+Cada API gerenciada possui um arquivo declarativo em `iac/resources/`. Exemplo:
 
-- client id esperado pelo serviço: `ms-telemetry-dashboard-service`
-- audience esperada no access token: `ms-telemetry-dashboard-service`
-- issuer esperado: `https://ouros-keycloak.discloud.app/realms/ouros`
+```bash
+CLIENT_ID="ms-example-api"
+AUDIENCE="ms-example-api"
+SCOPE_NAME="ms-example-api-audience"
+MAPPER_NAME="ms-example-api-audience"
+```
 
-No Keycloak, configure um client scope chamado `telemetry-audience` com um **Audience Protocol Mapper** adicionando `ms-telemetry-dashboard-service` ao claim `aud`. Associe esse client scope aos clients que emitirão access tokens usados para chamar o telemetry service. O serviço deve validar explicitamente `iss`, `exp`, assinatura e `aud`.
+O deploy cria ou atualiza automaticamente:
+
+- o client OIDC da API com flows de login desativados;
+- o client scope de audience;
+- o Audience Protocol Mapper;
+- o vínculo do scope como default no client.
+
+Para adicionar uma nova API ao Keycloak, adicione o arquivo em `iac/resources/`, abra uma PR e redeploye após o merge. O processo é idempotente e não remove clients automaticamente quando um arquivo é apagado, evitando exclusões acidentais.
+
+A configuração atual do `ms-telemetry-dashboard-service` já está versionada em `iac/resources/ms-telemetry-dashboard-service.conf`. Mais detalhes estão em [`iac/README.md`](iac/README.md).
+
+### Contrato OIDC do telemetry
+
+- client id: `ms-telemetry-dashboard-service`
+- audience no access token: `ms-telemetry-dashboard-service`
+- issuer: `https://ouros-keycloak.discloud.app/realms/ouros`
+
+O resource server deve validar explicitamente assinatura/JWKS, `iss`, `exp` e `aud`.
+
+> O client que efetivamente obtiver o token do usuário também precisará receber/solicitar o audience scope adequado conforme o fluxo final do `ms-auth-service`. `client_credentials` continua representando identidade de serviço, não de usuário.
 
 ## Variáveis de ambiente
 
@@ -81,11 +111,18 @@ Configure na Discloud:
 ```env
 KC_BOOTSTRAP_ADMIN_USERNAME=...
 KC_BOOTSTRAP_ADMIN_PASSWORD=...
+
+KC_IAC_ADMIN_USERNAME=...
+KC_IAC_ADMIN_PASSWORD=...
+KC_IAC_REALM=ouros
+
 KC_HOSTNAME=https://ouros-keycloak.discloud.app
 KC_DB_URL=jdbc:postgresql://keycloak-db:5432/keycloak
 KC_DB_USERNAME=keycloak
 KCRAW_DB_PASSWORD=...
 ```
+
+`KC_IAC_ADMIN_USERNAME` e `KC_IAC_ADMIN_PASSWORD` devem apontar para um administrador permanente usado pelo reconciliador. No primeiro rollout, o script aceita as credenciais bootstrap como fallback para facilitar a migração, mas as credenciais permanentes devem ser configuradas antes da remoção do temporary admin.
 
 O banco do Keycloak deve ser dedicado à identidade e permanecer acessível apenas pela VLAN da Discloud.
 
@@ -96,7 +133,7 @@ Para a senha do PostgreSQL, prefira `KCRAW_DB_PASSWORD`. Esse formato preserva v
 - nunca commitar credenciais reais;
 - manter o PostgreSQL do Keycloak somente na VLAN privada;
 - usar HTTPS para todos os acessos públicos ao Keycloak;
-- manter credenciais administrativas restritas ao `ms-auth-service` e aos operadores autorizados;
+- manter credenciais administrativas restritas ao `ms-auth-service`, ao reconciliador IaC e aos operadores autorizados;
 - executar o container do Keycloak como usuário não-root;
 - validar assinatura, `iss`, `aud` e expiração dos JWTs;
 - não confiar em `user_id` enviado pelo cliente quando o `sub` autenticado puder ser usado.
