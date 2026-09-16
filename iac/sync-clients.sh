@@ -5,6 +5,27 @@ KCADM="/opt/keycloak/bin/kcadm.sh"
 REALM="${KC_IAC_REALM:-ouros}"
 RESOURCE_DIR="${KC_IAC_RESOURCE_DIR:-/opt/keycloak/iac/resources}"
 
+kcadm_run() {
+  local output status
+
+  set +e
+  output="$("${KCADM}" "$@" 2>&1)"
+  status=$?
+  set -e
+
+  if (( status != 0 )); then
+    echo "[keycloak-iac] kcadm failed (${status}): kcadm.sh $*" >&2
+    if [[ -n "${output}" ]]; then
+      printf '%s\n' "${output}" >&2
+    else
+      echo "[keycloak-iac] kcadm produced no diagnostic output" >&2
+    fi
+    return "${status}"
+  fi
+
+  printf '%s' "${output}"
+}
+
 config_get() {
   local file="$1"
   local key="$2"
@@ -26,8 +47,10 @@ csv_lookup_id() {
   local endpoint="$1"
   local field="$2"
   local value="$3"
+  local output
 
-  "${KCADM}" get "${endpoint}" -r "${REALM}" --fields id,"${field}" --format csv --noquotes \
+  output="$(kcadm_run get "${endpoint}" -r "${REALM}" --fields id,"${field}" --format csv --noquotes)"
+  printf '%s\n' "${output}" \
     | awk -F, -v expected="${value}" 'NR > 1 && $2 == expected { print $1; exit }'
 }
 
@@ -91,11 +114,11 @@ upsert_base_client() {
   fi
 
   if [[ -z "${client_uuid}" ]]; then
-    "${KCADM}" create clients -r "${REALM}" -s "clientId=${client_id}" "${settings[@]}" >/dev/null
+    kcadm_run create clients -r "${REALM}" -s "clientId=${client_id}" "${settings[@]}" >/dev/null
     client_uuid="$(csv_lookup_id clients clientId "${client_id}")"
     echo "[keycloak-iac] created client ${client_id}" >&2
   else
-    "${KCADM}" update "clients/${client_uuid}" -r "${REALM}" "${settings[@]}" >/dev/null
+    kcadm_run update "clients/${client_uuid}" -r "${REALM}" "${settings[@]}" >/dev/null
     echo "[keycloak-iac] updated client ${client_id}" >&2
   fi
 
@@ -112,17 +135,17 @@ ensure_audience_scope() {
   local scope_name="$2"
   local mapper_name="$3"
 
-  local scope_uuid mapper_uuid
+  local scope_uuid mapper_uuid mapper_output
   scope_uuid="$(csv_lookup_id client-scopes name "${scope_name}")"
 
   if [[ -z "${scope_uuid}" ]]; then
-    "${KCADM}" create client-scopes -r "${REALM}" \
+    kcadm_run create client-scopes -r "${REALM}" \
       -s "name=${scope_name}" \
       -s protocol=openid-connect >/dev/null
     scope_uuid="$(csv_lookup_id client-scopes name "${scope_name}")"
     echo "[keycloak-iac] created client scope ${scope_name}" >&2
   else
-    "${KCADM}" update "client-scopes/${scope_uuid}" -r "${REALM}" \
+    kcadm_run update "client-scopes/${scope_uuid}" -r "${REALM}" \
       -s "name=${scope_name}" \
       -s protocol=openid-connect >/dev/null
     echo "[keycloak-iac] updated client scope ${scope_name}" >&2
@@ -133,8 +156,9 @@ ensure_audience_scope() {
     return 1
   fi
 
-  mapper_uuid="$(${KCADM} get "client-scopes/${scope_uuid}/protocol-mappers/models" -r "${REALM}" \
-    --fields id,name --format csv --noquotes \
+  mapper_output="$(kcadm_run get "client-scopes/${scope_uuid}/protocol-mappers/models" -r "${REALM}" \
+    --fields id,name --format csv --noquotes)"
+  mapper_uuid="$(printf '%s\n' "${mapper_output}" \
     | awk -F, -v expected="${mapper_name}" 'NR > 1 && $2 == expected { print $1; exit }')"
 
   local -a mapper_settings=(
@@ -149,10 +173,10 @@ ensure_audience_scope() {
   )
 
   if [[ -z "${mapper_uuid}" ]]; then
-    "${KCADM}" create "client-scopes/${scope_uuid}/protocol-mappers/models" -r "${REALM}" "${mapper_settings[@]}" >/dev/null
+    kcadm_run create "client-scopes/${scope_uuid}/protocol-mappers/models" -r "${REALM}" "${mapper_settings[@]}" >/dev/null
     echo "[keycloak-iac] created audience mapper ${mapper_name}" >&2
   else
-    "${KCADM}" update "client-scopes/${scope_uuid}/protocol-mappers/models/${mapper_uuid}" -r "${REALM}" "${mapper_settings[@]}" >/dev/null
+    kcadm_run update "client-scopes/${scope_uuid}/protocol-mappers/models/${mapper_uuid}" -r "${REALM}" "${mapper_settings[@]}" >/dev/null
     echo "[keycloak-iac] updated audience mapper ${mapper_name}" >&2
   fi
 
@@ -164,7 +188,7 @@ attach_default_scope() {
   local scope_uuid="$2"
   # This sub-resource supports PUT but not GET, so kcadm must skip its usual
   # read-before-update merge behavior.
-  "${KCADM}" update "clients/${client_uuid}/default-client-scopes/${scope_uuid}" -r "${REALM}" -n >/dev/null
+  kcadm_run update "clients/${client_uuid}/default-client-scopes/${scope_uuid}" -r "${REALM}" -n >/dev/null
 }
 
 scope_name_for_audience() {
