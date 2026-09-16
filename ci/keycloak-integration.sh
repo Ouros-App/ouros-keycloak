@@ -17,11 +17,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
+print_keycloak_logs() {
+  echo "[integration] Keycloak logs:" >&2
+  docker logs "${KEYCLOAK_CONTAINER}" >&2 2>/dev/null || true
+}
+
 on_error() {
   local status=$?
   trap - ERR
-  echo "[integration] Keycloak logs:" >&2
-  docker logs "${KEYCLOAK_CONTAINER}" >&2 2>/dev/null || true
+  print_keycloak_logs
   exit "${status}"
 }
 trap on_error ERR
@@ -82,12 +86,17 @@ for _ in $(seq 1 90); do
   fi
   if ! docker inspect "${KEYCLOAK_CONTAINER}" --format '{{.State.Running}}' 2>/dev/null | grep -qx true; then
     echo "[integration] Keycloak exited before IaC reconciliation completed" >&2
+    print_keycloak_logs
     exit 1
   fi
   sleep 2
 done
 
-[[ "${ready}" == true ]] || { echo "[integration] Keycloak/IaC readiness timed out" >&2; exit 1; }
+if [[ "${ready}" != true ]]; then
+  echo "[integration] Keycloak/IaC readiness timed out" >&2
+  print_keycloak_logs
+  exit 1
+fi
 
 echo "[integration] authenticating verifier"
 docker exec -e HOME=/tmp/ci-verify "${KEYCLOAK_CONTAINER}" /bin/bash -lc \
