@@ -50,19 +50,23 @@ config_get() {
 csv_id_for_value() {
   local output="$1"
   local expected="$2"
-  local id candidate
+  local first second
   local header=true
 
-  while IFS=',' read -r id candidate; do
+  while IFS=',' read -r first second; do
     if [[ "${header}" == true ]]; then
       header=false
       continue
     fi
 
-    id="${id%$'\r'}"
-    candidate="${candidate%$'\r'}"
-    if [[ "${candidate}" == "${expected}" ]]; then
-      printf '%s' "${id}"
+    first="${first%$'\r'}"
+    second="${second%$'\r'}"
+    if [[ "${second}" == "${expected}" ]]; then
+      printf '%s' "${first}"
+      return 0
+    fi
+    if [[ "${first}" == "${expected}" ]]; then
+      printf '%s' "${second}"
       return 0
     fi
   done <<< "${output}"
