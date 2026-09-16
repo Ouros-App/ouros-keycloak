@@ -60,6 +60,25 @@ WEB_ORIGINS="https://app.example.com"
 AUDIENCES="ms-example-api|ms-another-api"
 ```
 
+### `service`
+
+Representa uma identidade máquina-a-máquina, como worker, cron, automação ou integração backend.
+
+- confidential client;
+- client authentication ativada com `client-secret`;
+- service account ativada;
+- usa OAuth 2.0 Client Credentials;
+- Standard Flow, Direct Access Grants e Implicit Flow ficam desativados;
+- não possui redirect URI ou web origin;
+- pode receber audiences de um ou mais microserviços gerenciados;
+- o secret é gerado e armazenado pelo Keycloak, nunca no Git.
+
+```bash
+CLIENT_TYPE="service"
+CLIENT_ID="ouros-worker"
+AUDIENCES="ms-example-api|ms-another-api"
+```
+
 Valores múltiplos usam `|` como separador. Não use `*` em `WEB_ORIGINS`; mantenha as origens explícitas.
 
 ## Fluxo para adicionar um client
@@ -74,7 +93,7 @@ Uma mudança de client passa portanto pelo mesmo fluxo de revisão de código da
 
 ## Audiences
 
-`AUDIENCES` de clients `mobile` e `web` só pode referenciar audiences declaradas por clients `microservice` no mesmo diretório gerenciado. O reconciliador primeiro cria todos os resource servers e scopes e só depois configura os clients de aplicação, então a ordem dos arquivos não importa.
+`AUDIENCES` de clients `mobile`, `web` e `service` só pode referenciar audiences declaradas por clients `microservice` no mesmo diretório gerenciado. O reconciliador primeiro cria todos os resource servers e scopes e só depois configura os clients consumidores, então a ordem dos arquivos não importa.
 
 Exemplo:
 
@@ -87,13 +106,21 @@ SCOPE_NAME="ms-telemetry-dashboard-audience"
 MAPPER_NAME="ms-telemetry-dashboard-audience"
 ```
 
-Um mobile ou web client que declare:
+Um mobile, web ou service client que declare:
 
 ```bash
 AUDIENCES="ms-telemetry-dashboard-service"
 ```
 
-recebe `ms-telemetry-dashboard-audience` como default client scope e os access tokens passam a carregar a audience correspondente.
+recebe `ms-telemetry-dashboard-audience` como default client scope. Nos tokens emitidos para esse client, a audience do telemetry passa a aparecer no claim `aud`.
+
+## Service secrets
+
+O IaC não aceita `CLIENT_SECRET` nos arquivos `.conf`. Para `CLIENT_TYPE="service"`, o Keycloak cria e mantém o secret do confidential client. O consumidor deve obter esse valor por um canal operacional seguro, por exemplo no Admin Console ou por automação autorizada, e armazená-lo em um secret manager/variável de ambiente do serviço consumidor.
+
+Rotacionar ou distribuir secrets é uma operação diferente da declaração estrutural do client e não deve introduzir credenciais no Git.
+
+`client_credentials` autentica a própria aplicação. Um token emitido nesse fluxo representa a service account e não um usuário final.
 
 ## Autenticação do reconciliador
 
@@ -113,15 +140,15 @@ A sessão do `kcadm` é armazenada apenas em `/tmp/keycloak-iac` dentro do conta
 
 O reconciliador é idempotente e deliberadamente não destrutivo. Clients declarados são criados ou atualizados, mas remover um arquivo `.conf` não apaga automaticamente o client já existente no Keycloak. Exclusões devem ser explícitas em uma mudança dedicada.
 
-Arquivos em `iac/resources/` aceitam apenas declarações simples `KEY="value"`. A CI rejeita chaves desconhecidas, tipos inválidos, IDs duplicados, audiences duplicadas e referências para APIs que não estejam declaradas no IaC.
+Arquivos em `iac/resources/` aceitam apenas declarações simples `KEY="value"`. A CI rejeita chaves desconhecidas, tipos inválidos, IDs duplicados, audiences duplicadas, scope names duplicados e referências para APIs que não estejam declaradas no IaC.
 
-Secrets não pertencem a `iac/resources/`. Mobile e web são public clients e não possuem client secret. Credenciais administrativas continuam apenas no ambiente da Discloud.
+Secrets não pertencem a `iac/resources/`. Mobile e web são public clients sem secret. Services são confidential clients cujo secret vive no Keycloak/secret manager. Credenciais administrativas continuam apenas no ambiente da Discloud.
 
 ## Validação local
 
 ```bash
 bash iac/validate.sh
-shellcheck iac/*.sh scripts/*.sh
+shellcheck iac/*.sh scripts/*.sh ci/*.sh
 ```
 
-Os testes de integração da CI também sobem PostgreSQL + Keycloak e validam os três tipos de client usando `iac/test-fixtures/`.
+Os testes de integração da CI sobem PostgreSQL + Keycloak e validam os quatro tipos de client usando `iac/test-fixtures/`, incluindo um token real via Client Credentials para o tipo `service`.
