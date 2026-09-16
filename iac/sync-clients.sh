@@ -86,6 +86,7 @@ upsert_base_client() {
   local redirect_uris_json="$4"
   local web_origins_json="$5"
   local pkce="$6"
+  local service_accounts="$7"
 
   local client_uuid
   client_uuid="$(csv_lookup_id clients clientId "${client_id}")"
@@ -99,7 +100,7 @@ upsert_base_client() {
     -s "standardFlowEnabled=${standard_flow}"
     -s directAccessGrantsEnabled=false
     -s implicitFlowEnabled=false
-    -s serviceAccountsEnabled=false
+    -s "serviceAccountsEnabled=${service_accounts}"
     -s authorizationServicesEnabled=false
     -s consentRequired=false
     -s alwaysDisplayInConsole=false
@@ -111,6 +112,10 @@ upsert_base_client() {
     settings+=( -s 'attributes={"pkce.code.challenge.method":"S256"}' )
   else
     settings+=( -s 'attributes={}' )
+  fi
+
+  if [[ "${service_accounts}" == true ]]; then
+    settings+=( -s clientAuthenticatorType=client-secret )
   fi
 
   if [[ -z "${client_uuid}" ]]; then
@@ -211,6 +216,33 @@ scope_name_for_audience() {
   return 1
 }
 
+attach_managed_audiences() {
+  local client_uuid="$1"
+  local client_id="$2"
+  local audiences="$3"
+  local audience scope_name scope_uuid
+  local -a audience_items=()
+
+  [[ -n "${audiences}" ]] || return 0
+
+  IFS='|' read -r -a audience_items <<< "${audiences}"
+  for audience in "${audience_items[@]}"; do
+    if ! scope_name="$(scope_name_for_audience "${audience}")"; then
+      echo "[keycloak-iac] ${client_id} references unmanaged audience ${audience}" >&2
+      return 1
+    fi
+
+    scope_uuid="$(csv_lookup_id client-scopes name "${scope_name}")"
+    if [[ -z "${scope_uuid}" ]]; then
+      echo "[keycloak-iac] audience scope ${scope_name} for ${audience} does not exist" >&2
+      return 1
+    fi
+
+    attach_default_scope "${client_uuid}" "${scope_uuid}"
+    echo "[keycloak-iac] attached audience ${audience} to ${client_id}"
+  done
+}
+
 reconcile_microservice() {
   local file="$1"
   local client_id audience scope_name mapper_name client_uuid scope_uuid
@@ -223,7 +255,7 @@ reconcile_microservice() {
   [[ -n "${client_id}" ]] || { echo "[keycloak-iac] CLIENT_ID missing in ${file}" >&2; return 1; }
 
   echo "[keycloak-iac] reconciling microservice ${client_id}"
-  client_uuid="$(upsert_base_client "${client_id}" true false '[]' '[]' false)"
+  client_uuid="$(upsert_base_client "${client_id}" true false '[]' '[]' false false)"
   scope_uuid="$(ensure_audience_scope "${audience}" "${scope_name}" "${mapper_name}")"
   attach_default_scope "${client_uuid}" "${scope_uuid}"
   echo "[keycloak-iac] microservice ${client_id} ready with audience ${audience}"
@@ -232,8 +264,7 @@ reconcile_microservice() {
 reconcile_application() {
   local file="$1"
   local client_type client_id redirect_uris web_origins audiences
-  local redirect_json web_origins_json client_uuid audience scope_name scope_uuid
-  local -a audience_items=()
+  local redirect_json web_origins_json client_uuid
 
   client_type="$(config_get "${file}" CLIENT_TYPE)"
   client_id="$(config_get "${file}" CLIENT_ID)"
@@ -253,26 +284,26 @@ reconcile_application() {
   web_origins_json="$(json_array_from_pipe "${web_origins}")"
 
   echo "[keycloak-iac] reconciling ${client_type} client ${client_id}"
-  client_uuid="$(upsert_base_client "${client_id}" true true "${redirect_json}" "${web_origins_json}" true)"
-
-  if [[ -n "${audiences}" ]]; then
-    IFS='|' read -r -a audience_items <<< "${audiences}"
-    for audience in "${audience_items[@]}"; do
-      if ! scope_name="$(scope_name_for_audience "${audience}")"; then
-        echo "[keycloak-iac] ${client_id} references unmanaged audience ${audience}" >&2
-        return 1
-      fi
-      scope_uuid="$(csv_lookup_id client-scopes name "${scope_name}")"
-      if [[ -z "${scope_uuid}" ]]; then
-        echo "[keycloak-iac] audience scope ${scope_name} for ${audience} does not exist" >&2
-        return 1
-      fi
-      attach_default_scope "${client_uuid}" "${scope_uuid}"
-      echo "[keycloak-iac] attached audience ${audience} to ${client_id}"
-    done
-  fi
+  client_uuid="$(upsert_base_client "${client_id}" true true "${redirect_json}" "${web_origins_json}" true false)"
+  attach_managed_audiences "${client_uuid}" "${client_id}" "${audiences}"
 
   echo "[keycloak-iac] ${client_type} client ${client_id} ready with Authorization Code + PKCE S256"
+}
+
+reconcile_service() {
+  local file="$1"
+  local client_id audiences client_uuid
+
+  client_id="$(config_get "${file}" CLIENT_ID)"
+  audiences="$(config_get "${file}" AUDIENCES)"
+
+  [[ -n "${client_id}" ]] || { echo "[keycloak-iac] CLIENT_ID missing in ${file}" >&2; return 1; }
+
+  echo "[keycloak-iac] reconciling service client ${client_id}"
+  client_uuid="$(upsert_base_client "${client_id}" false false '[]' '[]' false true)"
+  attach_managed_audiences "${client_uuid}" "${client_id}" "${audiences}"
+
+  echo "[keycloak-iac] service client ${client_id} ready for Client Credentials"
 }
 
 shopt -s nullglob
@@ -283,13 +314,14 @@ if (( ${#resource_files[@]} == 0 )); then
   exit 0
 fi
 
-# First create every resource server and its audience scope. Applications are
-# reconciled afterwards so their AUDIENCES references are order-independent.
+# First create every resource server and its audience scope. Applications and
+# service identities are reconciled afterwards so AUDIENCES references are
+# order-independent.
 for config_file in "${resource_files[@]}"; do
   client_type="$(config_get "${config_file}" CLIENT_TYPE)"
   case "${client_type}" in
     microservice) reconcile_microservice "${config_file}" ;;
-    mobile|web) ;;
+    mobile|web|service) ;;
     *) echo "[keycloak-iac] unsupported CLIENT_TYPE '${client_type}' in ${config_file}" >&2; exit 1 ;;
   esac
 done
@@ -298,5 +330,6 @@ for config_file in "${resource_files[@]}"; do
   client_type="$(config_get "${config_file}" CLIENT_TYPE)"
   case "${client_type}" in
     mobile|web) reconcile_application "${config_file}" ;;
+    service) reconcile_service "${config_file}" ;;
   esac
 done
