@@ -99,13 +99,15 @@ validate_group() {
   local directory="$1"
   local pattern="$2"
   local label="$3"
+  local require_all_types="${4:-false}"
   local file client_type client_id audience audiences redirect_uris web_origins scope_name mapper_name
-  local audience_item
+  local audience_item required_type
   local -a files=()
   local -a audience_items=()
   local -A client_ids=()
   local -A managed_audiences=()
   local -A scope_names=()
+  local -A client_types_seen=()
 
   while IFS= read -r file; do
     files+=("${file}")
@@ -125,7 +127,10 @@ validate_group() {
     scope_name="$(config_get "${file}" SCOPE_NAME)"
     mapper_name="$(config_get "${file}" MAPPER_NAME)"
 
-    [[ "${client_type}" =~ ^(microservice|mobile|web)$ ]] || fail "${file}: CLIENT_TYPE must be microservice, mobile or web"
+    [[ "${client_type}" =~ ^(microservice|mobile|web|service)$ ]] \
+      || fail "${file}: CLIENT_TYPE must be microservice, mobile, web or service"
+    client_types_seen["${client_type}"]=1
+
     [[ "${client_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || fail "${file}: invalid CLIENT_ID '${client_id}'"
     [[ -z "${client_ids[${client_id}]:-}" ]] || fail "${label}: duplicate CLIENT_ID ${client_id}"
     client_ids["${client_id}"]="${file}"
@@ -160,12 +165,18 @@ validate_group() {
         [[ -z "${scope_name}" && -z "${mapper_name}" && "$(config_get "${file}" AUDIENCE)" == "" ]] \
           || fail "${file}: web clients cannot declare AUDIENCE, SCOPE_NAME or MAPPER_NAME"
         ;;
+      service)
+        [[ -z "${redirect_uris}" && -z "${web_origins}" ]] \
+          || fail "${file}: service clients cannot declare REDIRECT_URIS or WEB_ORIGINS"
+        [[ -z "${scope_name}" && -z "${mapper_name}" && "$(config_get "${file}" AUDIENCE)" == "" ]] \
+          || fail "${file}: service clients cannot declare AUDIENCE, SCOPE_NAME or MAPPER_NAME"
+        ;;
     esac
   done
 
   for file in "${files[@]}"; do
     client_type="$(config_get "${file}" CLIENT_TYPE)"
-    [[ "${client_type}" == mobile || "${client_type}" == web ]] || continue
+    [[ "${client_type}" == mobile || "${client_type}" == web || "${client_type}" == service ]] || continue
 
     audiences="$(config_get "${file}" AUDIENCES)"
     [[ -n "${audiences}" ]] || continue
@@ -176,6 +187,13 @@ validate_group() {
         || fail "${file}: AUDIENCES references unmanaged microservice audience ${audience_item}"
     done
   done
+
+  if [[ "${require_all_types}" == true ]]; then
+    for required_type in microservice mobile web service; do
+      [[ -n "${client_types_seen[${required_type}]:-}" ]] \
+        || fail "${label}: missing ${required_type} client coverage"
+    done
+  fi
 
   echo "[iac-validate] ${label}: ${#files[@]} client declarations valid"
 }
@@ -191,8 +209,8 @@ grep -qx 'VLAN=true' discloud.config || fail "discloud.config must keep VLAN=tru
 
 grep -q 'keycloak-entrypoint.sh' Dockerfile || fail "Dockerfile must run the IaC-aware entrypoint"
 
-validate_group iac/resources '*.conf' production
-validate_group iac/examples '*.conf.example' examples
-validate_group iac/test-fixtures '*.conf' test-fixtures
+validate_group iac/resources '*.conf' production false
+validate_group iac/examples '*.conf.example' examples true
+validate_group iac/test-fixtures '*.conf' test-fixtures true
 
 echo "[iac-validate] repository configuration is valid"
