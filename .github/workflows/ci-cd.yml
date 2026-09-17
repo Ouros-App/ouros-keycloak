@@ -116,9 +116,17 @@ jobs:
           test -f discloud.config
           test -f realm/ouros-realm.json
           test -f iac/validate.sh
+          test -f iac/validate-user-storage.sh
           test -f iac/sync-clients.sh
+          test -f iac/sync-user-storage.sh
           test -f scripts/keycloak-entrypoint.sh
           test -f ci/keycloak-integration.sh
+          test -f ci/mock-auth-service.py
+          test -f providers/ouros-user-storage/pom.xml
+          test -f providers/ouros-user-storage/src/main/resources/META-INF/services/org.keycloak.storage.UserStorageProviderFactory
+          test -f iac/resources/ms-auth-service-internal.conf
+          test -f iac/resources/keycloak-user-storage.conf
+          test -f iac/user-storage/ouros-auth-service.conf
           test -f iac/examples/microservice.conf.example
           test -f iac/examples/mobile.conf.example
           test -f iac/examples/web.conf.example
@@ -127,27 +135,45 @@ jobs:
           test -f iac/test-fixtures/ci-mobile.conf
           test -f iac/test-fixtures/ci-web.conf
           test -f iac/test-fixtures/ci-service.conf
+          test -f iac/test-fixtures/ci-auth-api.conf
+          test -f iac/test-fixtures/ci-user-storage.conf
+          test -f iac/test-fixtures/user-storage/ouros-auth-service.conf
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Compile User Storage provider
+        run: mvn -B -q -f providers/ouros-user-storage/pom.xml package -DskipTests
 
       - name: Check Bash syntax
         run: |
           bash -n iac/validate.sh
+          bash -n iac/validate-user-storage.sh
           bash -n iac/sync-clients.sh
+          bash -n iac/sync-user-storage.sh
           bash -n scripts/keycloak-entrypoint.sh
           bash -n ci/keycloak-integration.sh
 
       - name: Run ShellCheck
         run: |
           shellcheck iac/validate.sh
+          shellcheck iac/validate-user-storage.sh
           shellcheck iac/sync-clients.sh
+          shellcheck iac/sync-user-storage.sh
           shellcheck scripts/keycloak-entrypoint.sh
           shellcheck ci/keycloak-integration.sh
 
       - name: Validate realm, Discloud and client declarations
-        run: bash iac/validate.sh
+        run: |
+          bash iac/validate.sh
+          bash iac/validate-user-storage.sh
 
       - name: Ensure tracked configuration contains no obvious secrets
         run: |
-          if grep -RniE '(password|secret|token)="[^".][^"]+"' iac/resources iac/examples iac/test-fixtures; then
+          if grep -RniE '(password|secret|token)="[^".][^"]+"' iac/resources iac/user-storage iac/examples iac/test-fixtures; then
             echo "Tracked IaC files must not contain credentials or client secrets."
             exit 1
           fi
