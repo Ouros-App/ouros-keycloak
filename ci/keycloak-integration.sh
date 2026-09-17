@@ -165,7 +165,7 @@ jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled ==
 jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == true and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == false and .[0].attributes["pkce.code.challenge.method"] == "S256" and (.[0].redirectUris | index("https://ci.example.invalid/*") != null) and (.[0].webOrigins | index("https://ci.example.invalid") != null)' <<< "${web_json}" >/dev/null
 jq -e 'length == 1 and .[0].publicClient == false and .[0].standardFlowEnabled == false and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == true and .[0].clientAuthenticatorType == "client-secret"' <<< "${service_json}" >/dev/null
 jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == false and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == false' <<< "${auth_api_json}" >/dev/null
-jq -e 'length == 1 and .[0].publicClient == false and .[0].standardFlowEnabled == false and .[0].directAccessGrantsEnabled == false and .[0].serviceAccountsEnabled == true and .[0].clientAuthenticatorType == "client-secret"' <<< "${user_storage_service_json}" >/dev/null
+jq -e 'length == 1 and .[0].publicClient == false and .[0].standardFlowEnabled == false and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == true and .[0].clientAuthenticatorType == "client-secret"' <<< "${user_storage_service_json}" >/dev/null
 
 api_uuid="$(jq -r '.[0].id' <<< "${api_json}")"
 mobile_uuid="$(jq -r '.[0].id' <<< "${mobile_json}")"
