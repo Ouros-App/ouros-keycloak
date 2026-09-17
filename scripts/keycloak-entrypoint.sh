@@ -25,16 +25,11 @@ if [[ -z "${IAC_ADMIN_USERNAME}" || -z "${IAC_ADMIN_PASSWORD}" ]]; then
   exit 1
 fi
 
-# Keep kcadm tokens and credentials ephemeral and outside the image filesystem.
 export HOME="/tmp/keycloak-iac"
 mkdir -p "${HOME}/.keycloak"
 chmod 700 "${HOME}" "${HOME}/.keycloak"
 
-# kcadm starts a separate JVM for each invocation. Keep that helper JVM small so
-# reconciliation stays well inside the same 2 GiB container budget as Keycloak.
 export KC_OPTS="${KC_IAC_CLI_JAVA_OPTS:--Xms32m -Xmx192m}"
-
-# kcadm supports KC_CLI_PASSWORD, which avoids exposing the password in argv.
 export KC_CLI_PASSWORD="${IAC_ADMIN_PASSWORD}"
 
 attempt=1
@@ -65,6 +60,7 @@ unset KC_CLI_PASSWORD
 
 echo "[keycloak-iac] Admin API ready; reconciling managed resources"
 bash /opt/keycloak/iac/sync-clients.sh
+bash /opt/keycloak/iac/sync-user-storage.sh
 
 echo "[keycloak-iac] reconciliation complete"
 wait "${KEYCLOAK_PID}"
