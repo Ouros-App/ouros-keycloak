@@ -4,6 +4,7 @@ import org.keycloak.component.ComponentModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.RoleModel;
+import org.keycloak.models.UserCredentialManager;
 import org.keycloak.storage.StorageId;
 import org.keycloak.storage.adapter.AbstractUserAdapter;
 
@@ -36,6 +37,11 @@ final class OurosUserAdapter extends AbstractUserAdapter {
     @Override
     public String getId() {
         return StorageId.keycloakId(storageProviderModel, identity.externalId());
+    }
+
+    @Override
+    public UserCredentialManager credentialManager() {
+        return session.users().getUserCredentialManager(this);
     }
 
     @Override
