@@ -25,8 +25,13 @@ final class OurosIdentity {
     }
 
     static OurosIdentity fromJson(JsonNode node) {
+        JsonNode id = node.get("id");
+        if (id == null || !id.isIntegralNumber() || !id.canConvertToLong()) {
+            throw new IllegalArgumentException("Missing or invalid identity field: id");
+        }
+
         return new OurosIdentity(
-                node.path("id").asLong(),
+                id.longValue(),
                 requiredText(node, "email"),
                 requiredText(node, "account_type"),
                 requiredText(node, "realm_role"),
@@ -69,4 +74,35 @@ final class OurosIdentity {
     Long enterpriseId() { return enterpriseId; }
     Boolean firstAccess() { return firstAccess; }
     String externalId() { return accountType + ":" + databaseId; }
+
+    String firstName() {
+        return profileName().firstName();
+    }
+
+    String lastName() {
+        return profileName().lastName();
+    }
+
+    private ProfileName profileName() {
+        String normalized = name;
+        if (normalized == null || normalized.isBlank()) {
+            String localPart = email.split("@", 2)[0];
+            normalized = localPart.replaceAll("[._-]+", " ");
+        }
+        normalized = normalized == null ? "" : normalized.trim().replaceAll("\\s+", " ");
+        if (normalized.isBlank()) {
+            normalized = "Ouros";
+        }
+
+        int separator = normalized.indexOf(' ');
+        if (separator < 0) {
+            return new ProfileName(normalized, normalized);
+        }
+        return new ProfileName(
+                normalized.substring(0, separator),
+                normalized.substring(separator + 1)
+        );
+    }
+
+    private record ProfileName(String firstName, String lastName) {}
 }

@@ -37,8 +37,7 @@ final class OurosAuthApiClient {
         this.tokenUrl = tokenUrl;
         this.serviceClientId = serviceClientId;
         this.serviceClientSecret = serviceClientSecret;
-        this.tokenCacheKey = tokenUrl + "\u0000" + serviceClientId + "\u0000"
-                + Integer.toHexString(serviceClientSecret.hashCode());
+        this.tokenCacheKey = this.authServiceUrl + "\u0000" + tokenUrl + "\u0000" + serviceClientId;
     }
 
     Optional<OurosIdentity> findByEmail(String email) {
@@ -80,7 +79,7 @@ final class OurosAuthApiClient {
                     authServiceUrl + "/internal/v1/credentials/verify",
                     body
             );
-            if (response.statusCode() == 401) {
+            if (response.statusCode() == 401 || response.statusCode() == 403) {
                 return false;
             }
             requireStatus(response, 200, "credential verification");
@@ -93,12 +92,22 @@ final class OurosAuthApiClient {
     private HttpResponse<String> sendWithServiceToken(String method, String url, String body) {
         String token = getServiceToken();
         HttpResponse<String> response = send(method, url, body, token);
-        if (response.statusCode() == 401) {
+        if (isBearerAuthenticationFailure(response)) {
             TOKEN_CACHE.remove(tokenCacheKey);
             token = getServiceToken();
             response = send(method, url, body, token);
         }
         return response;
+    }
+
+    private static boolean isBearerAuthenticationFailure(HttpResponse<?> response) {
+        if (response.statusCode() != 401) {
+            return false;
+        }
+        return response.headers()
+                .firstValue("WWW-Authenticate")
+                .map(value -> value.toLowerCase().contains("bearer"))
+                .orElse(false);
     }
 
     private HttpResponse<String> send(String method, String url, String body, String bearerToken) {

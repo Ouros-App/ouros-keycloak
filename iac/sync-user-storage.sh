@@ -117,6 +117,13 @@ component_id="$(csv_id_for_name "${component_csv}" "${name}")"
 
 component_file="/tmp/keycloak-iac/ouros-user-storage-component.json"
 umask 077
+
+cleanup_component_file() {
+  rm -f "${component_file}"
+  unset service_client_secret || true
+}
+trap cleanup_component_file EXIT
+
 cat > "${component_file}" <<JSON
 {
   "name": "$(json_escape "${name}")",
@@ -144,7 +151,7 @@ else
   echo "[keycloak-iac] updated user-storage provider ${name}"
 fi
 
-rm -f "${component_file}"
-unset service_client_secret
+cleanup_component_file
+trap - EXIT
 
 echo "[keycloak-iac] user-storage provider ${name} reconciled"

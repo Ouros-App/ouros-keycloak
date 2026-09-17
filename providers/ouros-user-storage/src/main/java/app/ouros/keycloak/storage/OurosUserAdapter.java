@@ -61,7 +61,12 @@ final class OurosUserAdapter extends AbstractUserAdapter {
 
     @Override
     public String getFirstName() {
-        return identity.name();
+        return identity.firstName();
+    }
+
+    @Override
+    public String getLastName() {
+        return identity.lastName();
     }
 
     @Override
@@ -69,7 +74,8 @@ final class OurosUserAdapter extends AbstractUserAdapter {
         Map<String, List<String>> attributes = new LinkedHashMap<>();
         attributes.put("username", List.of(identity.email()));
         attributes.put("email", List.of(identity.email()));
-        put(attributes, "firstName", identity.name());
+        attributes.put("firstName", List.of(identity.firstName()));
+        attributes.put("lastName", List.of(identity.lastName()));
         put(attributes, DATABASE_ID, Long.toString(identity.databaseId()));
         put(attributes, ACCOUNT_TYPE, identity.accountType());
         put(attributes, REALM_ROLE, identity.realmRole());
