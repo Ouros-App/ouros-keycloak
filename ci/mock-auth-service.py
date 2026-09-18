@@ -61,7 +61,7 @@ class Handler(BaseHTTPRequestHandler):
         ):
             self._json(200, {"authenticated": True, "identity": IDENTITY})
         else:
-            self._json(401, {"detail": "Credenciais inválidas."})
+            self._json(403, {"detail": "Credenciais inválidas."})
 
     def log_message(self, _format, *_args):
         return
