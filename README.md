@@ -22,28 +22,37 @@ O repositório atualmente mantém:
 - realm `ouros` com as roles `farm_owner`, `company_employee` e `admin`;
 - PostgreSQL dedicado ao Keycloak na VLAN privada da Discloud;
 - endpoint público OIDC/JWKS em `https://ouros-keycloak.discloud.app`;
-- clients Keycloak reconciliados como Infrastructure as Code no startup;
+- realm, roles, clients, scopes e User Storage reconciliados como Infrastructure as Code no startup;
 - quatro perfis de client: `microservice`, `mobile`, `web` e `service`;
-- configuração inicial do `ms-telemetry-dashboard-service` versionada no IaC.
+- User Storage SPI read-only para autenticar identidades existentes do Ouros através do `ms-auth-service`;
+- escopo gerenciado `ouros-identity` para transportar claims de negócio em access tokens de usuários;
+- configuração do `ms-telemetry-dashboard-service` versionada no IaC.
 
-O `ms-auth-service` é o ponto de entrada planejado para o fluxo de autenticação da aplicação. Resource servers validam JWT localmente usando issuer, audience e JWKS do realm.
+O Keycloak é a autoridade que cria sessões e tokens de usuário. O `ms-auth-service` permanece responsável por consultar e validar as credenciais do banco legado através de endpoints internos autenticados. Resource servers validam JWT localmente usando issuer, audience e JWKS do realm.
 
 ## Topologia
 
 ```text
 Mobile / Web
     |
-    | HTTPS
-    v
-ms-auth-service
-    |
-    | OIDC
+    | Authorization Code + PKCE S256
     v
 https://ouros-keycloak.discloud.app
     |
-    | VLAN privada
+    | User Storage SPI
+    | service JWT: aud=ms-auth-service-internal
     v
-keycloak-db:5432
+ms-auth-service /internal/v1/*
+    |
+    | read-only
+    v
+PostgreSQL de identidade legado
+
+Keycloak
+    |
+    | sessão + access_token + refresh_token
+    v
+Mobile / Web
 
 Microservices
     |
@@ -65,7 +74,11 @@ A aplicação Keycloak é publicada como `TYPE=site`, enquanto `VLAN=true` permi
 - `Dockerfile`: imagem otimizada do Keycloak e entrypoint do reconciliador IaC.
 - `realm/ouros-realm.json`: bootstrap do realm e roles iniciais.
 - `scripts/keycloak-entrypoint.sh`: inicia o Keycloak, aguarda a Admin API e executa a reconciliação.
-- `iac/sync-clients.sh`: cria e atualiza clients, scopes e audience mappers via `kcadm.sh`.
+- `providers/ouros-user-storage/`: provider Java 21 que implementa User Storage para identidades Ouros.
+- `iac/sync-realm.sh`: reconcilia hardening do realm e as roles `farm_owner`, `company_employee` e `admin`.
+- `iac/sync-clients.sh`: cria e atualiza clients, audiences e o scope `ouros-identity`.
+- `iac/sync-user-storage.sh`: cria ou atualiza o componente User Storage e injeta o secret gerado pelo próprio Keycloak sem versioná-lo.
+- `iac/user-storage/`: configuração declarativa do provider em produção.
 - `iac/resources/`: fonte de verdade dos clients gerenciados em produção.
 - `iac/examples/`: exemplos dos tipos suportados.
 - `iac/test-fixtures/`: fixtures usadas nos testes de integração da CI.
@@ -161,6 +174,8 @@ AUDIENCES="ms-example-api|ms-another-api"
 
 Clients `service` são confidenciais. O Keycloak gera e mantém o client secret; ele não é versionado no repositório. `AUDIENCES` de `mobile`, `web` e `service` só pode apontar para audiences declaradas por clients `microservice`. Valores múltiplos usam `|` como separador.
 
+Todo client `mobile` ou `web` gerenciado recebe também o default client scope `ouros-identity`. Em tokens de usuário ele mapeia `database_id`, `account_type`, `farm_id`, `enterprise_id` e `first_access`. Campos opcionais ausentes não são inventados. A autorização principal continua em `realm_access.roles`, enquanto `sub` identifica o sujeito federado do Keycloak.
+
 O reconciliador é idempotente e não destrutivo: remover um arquivo do Git não apaga automaticamente o client já existente no Keycloak. Consulte [`iac/README.md`](iac/README.md) para o contrato completo.
 
 ## Deploy
@@ -184,7 +199,9 @@ No startup, o container executa a sequência:
 Keycloak
   -> aguarda Admin API
   -> autentica kcadm
-  -> reconcilia iac/resources/*.conf
+  -> reconcilia realm + roles
+  -> reconcilia clients + scopes
+  -> reconcilia User Storage
   -> mantém o processo principal ativo
 ```
 
@@ -237,7 +254,12 @@ A CI valida:
 - reconciliação dos tipos `microservice`, `mobile`, `web` e `service`;
 - PKCE S256, redirect URIs, web origins e audience scopes;
 - fluxo real `client_credentials` e audience do token de `service`;
-- idempotência da reconciliação;
+- login real de usuário federado, senha inválida e emissão de access + refresh token;
+- uso real do refresh token e preservação de `sub`, role e claims de negócio;
+- presença e tipos dos claims `database_id`, `account_type`, `farm_id` e `first_access`;
+- testes unitários Java do provider com JUnit, Mockito e MockWebServer;
+- cobertura JaCoCo importada no SonarCloud;
+- idempotência da reconciliação de realm, clients, scopes e User Storage;
 - disponibilidade do JWKS;
 - SonarCloud e CodeQL.
 
@@ -257,8 +279,15 @@ A CI valida:
 └── iac/
     ├── README.md
     ├── validate.sh
+    ├── validate-user-storage.sh
+    ├── sync-realm.sh
     ├── sync-clients.sh
+    ├── sync-user-storage.sh
+    ├── user-storage/
+    │   └── ouros-auth-service.conf
     ├── resources/
+    │   ├── keycloak-user-storage.conf
+    │   ├── ms-auth-service-internal.conf
     │   └── ms-telemetry-dashboard-service.conf
     ├── examples/
     │   ├── microservice.conf.example
@@ -282,7 +311,9 @@ A CI valida:
 - Direct Access Grants e Implicit Flow permanecem desativados;
 - a sessão administrativa do `kcadm` fica apenas em `/tmp/keycloak-iac`;
 - `client_credentials` representa identidade de serviço e nunca identidade de usuário;
-- IDs de usuário usados pelas APIs devem vir do `sub` de um JWT de usuário validado.
+- a comunicação Keycloak → `ms-auth-service` exige service JWT com issuer, audience e `azp` esperados;
+- senhas continuam no identity store legado e não podem ser sobrescritas pelo Keycloak;
+- `sub` é a identidade de autenticação estável do Keycloak; `database_id` é o ID legado usado quando a regra de negócio precisa referenciar a linha original.
 
 ## Licença
 
