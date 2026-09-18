@@ -299,13 +299,22 @@ wrong_login_status="$(curl -sS -o "${wrong_login_file}" -w '%{http_code}' \
 jq -e '.error == "invalid_grant"' "${wrong_login_file}" >/dev/null
 rm -f "${wrong_login_file}"
 
-login_token_json="$(curl -fsS \
+login_token_file="$(mktemp)"
+login_token_status="$(curl -sS -o "${login_token_file}" -w '%{http_code}' \
   -H 'Content-Type: application/x-www-form-urlencoded' \
   -d 'grant_type=password' \
   -d 'client_id=ci-login-test' \
   --data-urlencode 'username=ci-user@example.com' \
   --data-urlencode 'password=ci-password' \
   "http://localhost:${HOST_PORT}/realms/ouros/protocol/openid-connect/token")"
+if [[ "${login_token_status}" != 200 ]]; then
+  echo "[integration] valid external-user login returned HTTP ${login_token_status}" >&2
+  cat "${login_token_file}" >&2
+  rm -f "${login_token_file}"
+  exit 1
+fi
+login_token_json="$(cat "${login_token_file}")"
+rm -f "${login_token_file}"
 login_access_token="$(jq -r '.access_token' <<< "${login_token_json}")"
 login_refresh_token="$(jq -r '.refresh_token' <<< "${login_token_json}")"
 [[ -n "${login_access_token}" && "${login_access_token}" != null ]] \
