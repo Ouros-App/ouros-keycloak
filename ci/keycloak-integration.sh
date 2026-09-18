@@ -286,6 +286,19 @@ docker exec -e HOME=/tmp/ci-verify "${KEYCLOAK_CONTAINER}" \
   -s implicitFlowEnabled=false \
   -s serviceAccountsEnabled=false >/dev/null
 
+wrong_login_file="$(mktemp)"
+wrong_login_status="$(curl -sS -o "${wrong_login_file}" -w '%{http_code}' \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'grant_type=password' \
+  -d 'client_id=ci-login-test' \
+  --data-urlencode 'username=ci-user@example.com' \
+  --data-urlencode 'password=wrong-password' \
+  "http://localhost:${HOST_PORT}/realms/ouros/protocol/openid-connect/token")"
+[[ "${wrong_login_status}" == 401 ]] \
+  || { echo "[integration] wrong password returned HTTP ${wrong_login_status}" >&2; cat "${wrong_login_file}" >&2; rm -f "${wrong_login_file}"; exit 1; }
+jq -e '.error == "invalid_grant"' "${wrong_login_file}" >/dev/null
+rm -f "${wrong_login_file}"
+
 login_token_json="$(curl -fsS \
   -H 'Content-Type: application/x-www-form-urlencoded' \
   -d 'grant_type=password' \
@@ -309,6 +322,31 @@ jq -e '(.sub | type) == "string"
   and (.farm_id == 7)
   and (.first_access == false)
   and (has("enterprise_id") | not)' <<< "${login_payload}" >/dev/null
+
+echo "[integration] verifying refresh-token flow preserves federated identity"
+refresh_token_json="$(curl -fsS \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'grant_type=refresh_token' \
+  -d 'client_id=ci-login-test' \
+  --data-urlencode "refresh_token=${login_refresh_token}" \
+  "http://localhost:${HOST_PORT}/realms/ouros/protocol/openid-connect/token")"
+refreshed_access_token="$(jq -r '.access_token' <<< "${refresh_token_json}")"
+refreshed_refresh_token="$(jq -r '.refresh_token' <<< "${refresh_token_json}")"
+[[ -n "${refreshed_access_token}" && "${refreshed_access_token}" != null ]] \
+  || { echo "[integration] refreshed access token missing" >&2; exit 1; }
+[[ -n "${refreshed_refresh_token}" && "${refreshed_refresh_token}" != null ]] \
+  || { echo "[integration] refreshed refresh token missing" >&2; exit 1; }
+
+refreshed_payload="$(jwt_payload "${refreshed_access_token}")"
+jq -e --arg subject "$(jq -r '.sub' <<< "${login_payload}")" '
+  .sub == $subject
+  and (.preferred_username == "ci-user@example.com")
+  and (.realm_access.roles | index("farm_owner") != null)
+  and (.database_id == 42)
+  and (.account_type == "farm_owner")
+  and (.farm_id == 7)
+  and (.first_access == false)
+' <<< "${refreshed_payload}" >/dev/null
 
 echo "[integration] verifying idempotent reconciliation"
 docker exec "${KEYCLOAK_CONTAINER}" /bin/bash /opt/keycloak/iac/sync-realm.sh >/dev/null
