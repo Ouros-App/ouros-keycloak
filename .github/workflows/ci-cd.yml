@@ -343,3 +343,26 @@ jobs:
         with:
           token: ${{ secrets.DISCLOUD_TOKEN }}
           app_id: ouros-keycloak
+
+      - name: Verify production OIDC endpoints
+        run: |
+          discovery="https://ouros-keycloak.discloud.app/realms/ouros/.well-known/openid-configuration"
+          jwks="https://ouros-keycloak.discloud.app/realms/ouros/protocol/openid-connect/certs"
+
+          ready=false
+          for attempt in $(seq 1 60); do
+            if discovery_json="$(curl -fsS --max-time 5 "${discovery}" 2>/dev/null)" \
+              && jq -e '.issuer == "https://ouros-keycloak.discloud.app/realms/ouros"' <<< "${discovery_json}" >/dev/null \
+              && jwks_json="$(curl -fsS --max-time 5 "${jwks}" 2>/dev/null)" \
+              && jq -e '.keys | length > 0' <<< "${jwks_json}" >/dev/null; then
+              ready=true
+              break
+            fi
+            echo "Waiting for production Keycloak after deploy (attempt ${attempt}/60)"
+            sleep 5
+          done
+
+          if [[ "${ready}" != true ]]; then
+            echo "Production Keycloak did not expose valid OIDC discovery/JWKS after deploy." >&2
+            exit 1
+          fi
