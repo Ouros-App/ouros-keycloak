@@ -338,6 +338,34 @@ jobs:
           DISCLOUD_TOKEN: ${{ secrets.DISCLOUD_TOKEN }}
         run: test -n "${DISCLOUD_TOKEN}"
 
+      - name: Preflight ms-auth-service M3 bridge
+        run: |
+          auth_base="https://ms-auth-service.discloud.app"
+
+          curl -fsS --max-time 10 "${auth_base}/health" \
+            | jq -e '.status == "ok"' >/dev/null
+          curl -fsS --max-time 10 "${auth_base}/ready" \
+            | jq -e '.status == "ready"' >/dev/null
+
+          headers="$(mktemp)"
+          body="$(mktemp)"
+          trap 'rm -f "${headers}" "${body}"' EXIT
+
+          status="$(curl -sS --max-time 10 \
+            -D "${headers}" \
+            -o "${body}" \
+            -w '%{http_code}' \
+            "${auth_base}/internal/v1/identities/by-email?email=deployment-preflight%40invalid.local")"
+
+          if [[ "${status}" != 401 ]]; then
+            echo "ms-auth-service M3 internal bridge is not deployed (expected 401, got ${status})." >&2
+            cat "${body}" >&2 || true
+            exit 1
+          fi
+
+          grep -qi '^www-authenticate: Bearer' "${headers}" \
+            || { echo "ms-auth-service internal bridge did not return a Bearer challenge." >&2; exit 1; }
+
       - name: Deploy Ouros Keycloak to Discloud
         uses: discloud/deploy-action@fae7024653d941a19daa2b6f56d2ae208e008c54
         with:
