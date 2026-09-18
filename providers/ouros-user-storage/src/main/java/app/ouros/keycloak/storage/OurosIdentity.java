@@ -34,25 +34,43 @@ final class OurosIdentity {
 
     private static String requiredText(JsonNode node, String field) {
         JsonNode value = node.get(field);
-        if (value == null || value.isNull() || value.asText().isBlank()) {
-            throw new IllegalArgumentException("Missing identity field: " + field);
+        if (value == null || value.isNull() || !value.isTextual() || value.textValue().isBlank()) {
+            throw new IllegalArgumentException("Missing or invalid identity field: " + field);
         }
-        return value.asText();
+        return value.textValue();
     }
 
     private static String nullableText(JsonNode node, String field) {
         JsonNode value = node.get(field);
-        return value == null || value.isNull() ? null : value.asText();
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isTextual()) {
+            throw new IllegalArgumentException("Invalid identity field: " + field);
+        }
+        return value.textValue();
     }
 
     private static Long nullableLong(JsonNode node, String field) {
         JsonNode value = node.get(field);
-        return value == null || value.isNull() ? null : value.asLong();
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isIntegralNumber() || !value.canConvertToLong()) {
+            throw new IllegalArgumentException("Invalid identity field: " + field);
+        }
+        return value.longValue();
     }
 
     private static Boolean nullableBoolean(JsonNode node, String field) {
         JsonNode value = node.get(field);
-        return value == null || value.isNull() ? null : value.asBoolean();
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isBoolean()) {
+            throw new IllegalArgumentException("Invalid identity field: " + field);
+        }
+        return value.booleanValue();
     }
 
     long databaseId() { return databaseId; }

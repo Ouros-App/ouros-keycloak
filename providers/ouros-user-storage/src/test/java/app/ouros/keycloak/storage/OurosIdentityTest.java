@@ -110,4 +110,39 @@ class OurosIdentityTest {
         );
         assertTrue(error.getMessage().contains("email"));
     }
+
+    @Test
+    void rejectsNonTextualRequiredAndOptionalTextFields() throws Exception {
+        var numericEmail = JsonSerialization.mapper.readTree("""
+                {"id":1,"email":123,"account_type":"admin","realm_role":"admin"}
+                """);
+        var numericName = JsonSerialization.mapper.readTree("""
+                {"id":1,"email":"a@b.com","account_type":"admin","realm_role":"admin","name":123}
+                """);
+
+        assertThrows(IllegalArgumentException.class, () -> OurosIdentity.fromJson(numericEmail));
+        assertThrows(IllegalArgumentException.class, () -> OurosIdentity.fromJson(numericName));
+    }
+
+    @Test
+    void rejectsNonIntegralBusinessIds() throws Exception {
+        var textFarmId = JsonSerialization.mapper.readTree("""
+                {"id":1,"email":"a@b.com","account_type":"farm_owner","realm_role":"farm_owner","farm_id":"7"}
+                """);
+        var decimalEnterpriseId = JsonSerialization.mapper.readTree("""
+                {"id":1,"email":"a@b.com","account_type":"company_employee","realm_role":"company_employee","enterprise_id":7.5}
+                """);
+
+        assertThrows(IllegalArgumentException.class, () -> OurosIdentity.fromJson(textFarmId));
+        assertThrows(IllegalArgumentException.class, () -> OurosIdentity.fromJson(decimalEnterpriseId));
+    }
+
+    @Test
+    void rejectsNonBooleanFirstAccess() throws Exception {
+        var textFirstAccess = JsonSerialization.mapper.readTree("""
+                {"id":1,"email":"a@b.com","account_type":"farm_owner","realm_role":"farm_owner","first_access":"false"}
+                """);
+
+        assertThrows(IllegalArgumentException.class, () -> OurosIdentity.fromJson(textFirstAccess));
+    }
 }

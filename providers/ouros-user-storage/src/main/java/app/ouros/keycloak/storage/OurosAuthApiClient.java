@@ -94,7 +94,11 @@ final class OurosAuthApiClient {
         String token = getServiceToken();
         HttpResponse<String> response = send(method, url, body, token);
         if (isBearerAuthenticationFailure(response)) {
-            TOKEN_CACHE.remove(tokenCacheKey);
+            String rejectedToken = token;
+            TOKEN_CACHE.computeIfPresent(
+                    tokenCacheKey,
+                    (key, cached) -> cached.value().equals(rejectedToken) ? null : cached
+            );
             token = getServiceToken();
             response = send(method, url, body, token);
         }
