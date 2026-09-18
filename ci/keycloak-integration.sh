@@ -60,6 +60,13 @@ command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
 command -v base64 >/dev/null 2>&1 || { echo "base64 is required" >&2; exit 1; }
 
+echo "[integration] building User Storage provider"
+docker run --rm \
+  -v "${PWD}:/workspace" \
+  -w /workspace/providers/ouros-user-storage \
+  maven:3.9.9-eclipse-temurin-21 \
+  mvn -B -q package -DskipTests
+
 echo "[integration] building Keycloak image"
 docker build -t "${IMAGE}" .
 
