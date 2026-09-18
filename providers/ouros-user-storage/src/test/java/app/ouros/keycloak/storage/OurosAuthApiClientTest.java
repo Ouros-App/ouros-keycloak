@@ -162,6 +162,59 @@ class OurosAuthApiClientTest {
     }
 
     @Test
+    void bearerUnauthorizedAfterRefreshFailsClosed() {
+        enqueueToken("expired-token");
+        server.enqueue(new MockResponse()
+                .setResponseCode(401)
+                .setHeader("WWW-Authenticate", "Bearer"));
+        enqueueToken("replacement-token");
+        server.enqueue(new MockResponse()
+                .setResponseCode(401)
+                .setHeader("WWW-Authenticate", "Bearer"));
+
+        assertThrows(
+                StorageUnavailableException.class,
+                () -> client().findByEmail("user@example.com")
+        );
+        assertEquals(4, server.getRequestCount());
+    }
+
+    @Test
+    void tokenCacheIsIsolatedWhenServiceClientSecretChanges() throws Exception {
+        enqueueToken("token-a");
+        server.enqueue(new MockResponse().setResponseCode(404));
+        enqueueToken("token-b");
+        server.enqueue(new MockResponse().setResponseCode(404));
+
+        OurosAuthApiClient first = new OurosAuthApiClient(
+                server.url("/auth/").toString(),
+                server.url("/token").toString(),
+                "shared-client",
+                "secret-a"
+        );
+        OurosAuthApiClient second = new OurosAuthApiClient(
+                server.url("/auth/").toString(),
+                server.url("/token").toString(),
+                "shared-client",
+                "secret-b"
+        );
+
+        assertTrue(first.findByEmail("first@example.com").isEmpty());
+        assertTrue(second.findByEmail("second@example.com").isEmpty());
+        assertEquals(4, server.getRequestCount());
+
+        RecordedRequest firstTokenRequest = server.takeRequest(1, TimeUnit.SECONDS);
+        server.takeRequest(1, TimeUnit.SECONDS);
+        RecordedRequest secondTokenRequest = server.takeRequest(1, TimeUnit.SECONDS);
+        assertNotNull(firstTokenRequest);
+        assertNotNull(secondTokenRequest);
+        assertNotEquals(
+                firstTokenRequest.getHeader("Authorization"),
+                secondTokenRequest.getHeader("Authorization")
+        );
+    }
+
+    @Test
     void validPasswordReturnsTrue() throws Exception {
         enqueueToken("password-token");
         server.enqueue(new MockResponse().setResponseCode(200).setBody(
