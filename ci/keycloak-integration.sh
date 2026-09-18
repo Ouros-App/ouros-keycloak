@@ -173,6 +173,11 @@ jq -e '
   and .bruteForceProtected == true
 ' <<< "${realm_json}" >/dev/null
 
+roles_json="$(kcadm_get roles -r ouros)"
+for managed_role in farm_owner company_employee admin; do
+  jq -e --arg role "${managed_role}" '.[] | select(.name == $role)' <<< "${roles_json}" >/dev/null
+done
+
 api_json="$(kcadm_get clients -r ouros -q clientId=ci-api)"
 mobile_json="$(kcadm_get clients -r ouros -q clientId=ci-mobile)"
 web_json="$(kcadm_get clients -r ouros -q clientId=ci-web)"
@@ -196,10 +201,23 @@ user_storage_service_uuid="$(jq -r '.[0].id' <<< "${user_storage_service_json}")
 
 scope_json="$(kcadm_get client-scopes -r ouros)"
 scope_uuid="$(jq -r '.[] | select(.name == "ci-api-audience") | .id' <<< "${scope_json}")"
+identity_scope_uuid="$(jq -r '.[] | select(.name == "ouros-identity") | .id' <<< "${scope_json}")"
 [[ -n "${scope_uuid}" && "${scope_uuid}" != null ]] || { echo "[integration] ci-api-audience scope missing" >&2; exit 1; }
+[[ -n "${identity_scope_uuid}" && "${identity_scope_uuid}" != null ]] || { echo "[integration] ouros-identity scope missing" >&2; exit 1; }
 
 mapper_json="$(kcadm_get "client-scopes/${scope_uuid}/protocol-mappers/models" -r ouros)"
 jq -e '.[] | select(.name == "ci-api-audience" and .protocolMapper == "oidc-audience-mapper" and .config["included.client.audience"] == "ci-api" and .config["access.token.claim"] == "true")' <<< "${mapper_json}" >/dev/null
+
+identity_mappers="$(kcadm_get "client-scopes/${identity_scope_uuid}/protocol-mappers/models" -r ouros)"
+jq -e '
+  map(select(.protocolMapper == "oidc-usermodel-attribute-mapper")) as $mappers
+  | ($mappers | length) == 5
+  and any($mappers[]; .name == "ouros-database_id" and .config["user.attribute"] == "database_id" and .config["claim.name"] == "database_id" and .config["jsonType.label"] == "long" and .config["access.token.claim"] == "true")
+  and any($mappers[]; .name == "ouros-account_type" and .config["user.attribute"] == "account_type" and .config["claim.name"] == "account_type" and .config["jsonType.label"] == "String" and .config["access.token.claim"] == "true")
+  and any($mappers[]; .name == "ouros-farm_id" and .config["user.attribute"] == "farm_id" and .config["claim.name"] == "farm_id" and .config["jsonType.label"] == "long" and .config["access.token.claim"] == "true")
+  and any($mappers[]; .name == "ouros-enterprise_id" and .config["user.attribute"] == "enterprise_id" and .config["claim.name"] == "enterprise_id" and .config["jsonType.label"] == "long" and .config["access.token.claim"] == "true")
+  and any($mappers[]; .name == "ouros-first_access" and .config["user.attribute"] == "first_access" and .config["claim.name"] == "first_access" and .config["jsonType.label"] == "boolean" and .config["access.token.claim"] == "true")
+' <<< "${identity_mappers}" >/dev/null
 
 mobile_scopes="$(kcadm_get "clients/${mobile_uuid}/default-client-scopes" -r ouros)"
 web_scopes="$(kcadm_get "clients/${web_uuid}/default-client-scopes" -r ouros)"
@@ -209,7 +227,9 @@ auth_api_scopes="$(kcadm_get "clients/${auth_api_uuid}/default-client-scopes" -r
 user_storage_scopes="$(kcadm_get "clients/${user_storage_service_uuid}/default-client-scopes" -r ouros)"
 
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${mobile_scopes}" >/dev/null
+jq -e '.[] | select(.name == "ouros-identity")' <<< "${mobile_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${web_scopes}" >/dev/null
+jq -e '.[] | select(.name == "ouros-identity")' <<< "${web_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${service_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${api_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ci-auth-api-audience")' <<< "${auth_api_scopes}" >/dev/null
@@ -283,7 +303,12 @@ login_refresh_token="$(jq -r '.refresh_token' <<< "${login_token_json}")"
 login_payload="$(jwt_payload "${login_access_token}")"
 jq -e '(.sub | type) == "string"
   and (.preferred_username == "ci-user@example.com")
-  and (.realm_access.roles | index("farm_owner") != null)' <<< "${login_payload}" >/dev/null
+  and (.realm_access.roles | index("farm_owner") != null)
+  and (.database_id == 42)
+  and (.account_type == "farm_owner")
+  and (.farm_id == 7)
+  and (.first_access == false)
+  and (has("enterprise_id") | not)' <<< "${login_payload}" >/dev/null
 
 echo "[integration] verifying idempotent reconciliation"
 docker exec "${KEYCLOAK_CONTAINER}" /bin/bash /opt/keycloak/iac/sync-realm.sh >/dev/null
@@ -292,6 +317,11 @@ docker exec "${KEYCLOAK_CONTAINER}" /bin/bash /opt/keycloak/iac/sync-user-storag
 
 components_after_reconcile="$(kcadm_get components -r ouros -q type=org.keycloak.storage.UserStorageProvider -q name=ouros-auth-service)"
 jq -e 'length == 1 and .[0].providerId == "ouros-auth-service"' <<< "${components_after_reconcile}" >/dev/null
+
+scopes_after_reconcile="$(kcadm_get client-scopes -r ouros)"
+jq -e '[.[] | select(.name == "ouros-identity")] | length == 1' <<< "${scopes_after_reconcile}" >/dev/null
+identity_mappers_after_reconcile="$(kcadm_get "client-scopes/${identity_scope_uuid}/protocol-mappers/models" -r ouros)"
+jq -e '[.[] | select(.name | startswith("ouros-"))] | length == 5' <<< "${identity_mappers_after_reconcile}" >/dev/null
 
 curl -fsS "http://localhost:${HOST_PORT}/realms/ouros/protocol/openid-connect/certs" \
   | jq -e '.keys | length > 0' >/dev/null
