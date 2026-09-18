@@ -145,8 +145,8 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Compile User Storage provider
-        run: mvn -B -q -f providers/ouros-user-storage/pom.xml package -DskipTests
+      - name: Test User Storage provider
+        run: mvn -B -q -f providers/ouros-user-storage/pom.xml verify
 
       - name: Check Bash syntax
         run: |
@@ -201,6 +201,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Run provider tests with JaCoCo
+        run: mvn -B -q -f providers/ouros-user-storage/pom.xml verify
+
       - name: Configure SonarCloud
         env:
           SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
@@ -211,8 +220,11 @@ jobs:
           {
             echo "sonar.organization=${SONAR_ORGANIZATION:-$owner}"
             echo "sonar.projectKey=${SONAR_PROJECT_KEY:-${owner}_${repo}}"
-            echo "sonar.sources=."
-            echo "sonar.exclusions=.git/**,.github/**,dist/**,build/**"
+            echo "sonar.sources=providers/ouros-user-storage/src/main/java,iac,scripts,Dockerfile"
+            echo "sonar.tests=providers/ouros-user-storage/src/test/java"
+            echo "sonar.exclusions=iac/test-fixtures/**,iac/examples/**"
+            echo "sonar.java.binaries=providers/ouros-user-storage/target/classes"
+            echo "sonar.coverage.jacoco.xmlReportPaths=providers/ouros-user-storage/target/site/jacoco/jacoco.xml"
             if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
               echo "sonar.branch.name=main"
             fi
