@@ -228,9 +228,8 @@ jobs:
             echo "sonar.exclusions=iac/test-fixtures/**,iac/examples/**"
             echo "sonar.java.binaries=providers/ouros-user-storage/target/classes"
             echo "sonar.coverage.jacoco.xmlReportPaths=providers/ouros-user-storage/target/site/jacoco/jacoco.xml"
-            if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
-              echo "sonar.branch.name=main"
-            fi
+            # Let SonarCloud resolve the configured main branch on pushes and
+            # the pull-request metadata on PR analysis.
           } > sonar-project.properties
 
       - name: Disable Automatic Analysis via API
