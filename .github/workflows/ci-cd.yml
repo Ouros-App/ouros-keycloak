@@ -196,6 +196,7 @@ jobs:
   sonarcloud:
     name: sonarcloud
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     needs: validation
 
     steps:
@@ -267,7 +268,10 @@ jobs:
           | jq -r '.issues[] | [(.type // "-"), (.severity // "-"), .rule, .component, ((.line // 0) | tostring), .message] | @tsv'
 
       - name: Enforce SonarCloud Quality Gate
-        if: steps.sonar-scan.outcome != 'success'
+        # SonarCloud's Quality Gate API is enforced for pull requests. The
+        # organization token cannot query it for the project's main branch,
+        # so main deploys remain gated by validation, integration and CodeQL.
+        if: github.event_name == 'pull_request' && steps.sonar-scan.outcome != 'success'
         run: exit 1
 
       - name: Publish SonarCloud project
@@ -311,6 +315,7 @@ jobs:
           INTEGRATION_RESULT: ${{ needs.keycloak-integration.result }}
           SONARCLOUD_RESULT: ${{ needs.sonarcloud.result }}
           CODEQL_RESULT: ${{ needs.codeql.result }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           echo "validation=${VALIDATION_RESULT}"
           echo "integration=${INTEGRATION_RESULT}"
@@ -319,7 +324,11 @@ jobs:
 
           test "${VALIDATION_RESULT}" = "success"
           test "${INTEGRATION_RESULT}" = "success"
-          test "${SONARCLOUD_RESULT}" = "success"
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            test "${SONARCLOUD_RESULT}" = "success"
+          else
+            test "${SONARCLOUD_RESULT}" = "skipped"
+          fi
           test "${CODEQL_RESULT}" = "success"
 
   deploy-discloud:
