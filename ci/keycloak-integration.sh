@@ -286,6 +286,14 @@ docker exec -e HOME=/tmp/ci-verify "${KEYCLOAK_CONTAINER}" \
   -s implicitFlowEnabled=false \
   -s serviceAccountsEnabled=false >/dev/null
 
+ci_login_json="$(kcadm_get clients -r ouros -q clientId=ci-login-test)"
+ci_login_uuid="$(jq -r '.[0].id' <<< "${ci_login_json}")"
+[[ -n "${ci_login_uuid}" && "${ci_login_uuid}" != null ]] \
+  || { echo "[integration] ci-login-test client missing" >&2; exit 1; }
+docker exec -e HOME=/tmp/ci-verify "${KEYCLOAK_CONTAINER}" \
+  /opt/keycloak/bin/kcadm.sh update "clients/${ci_login_uuid}/default-client-scopes/${identity_scope_uuid}" \
+  -r ouros -n >/dev/null
+
 wrong_login_file="$(mktemp)"
 wrong_login_status="$(curl -sS -o "${wrong_login_file}" -w '%{http_code}' \
   -H 'Content-Type: application/x-www-form-urlencoded' \
