@@ -149,6 +149,14 @@ jobs:
       - name: Test User Storage provider
         run: mvn -B -q -f providers/ouros-user-storage/pom.xml verify
 
+      - name: Upload validated User Storage provider
+        uses: actions/upload-artifact@v4
+        with:
+          name: ouros-user-storage-build
+          path: providers/ouros-user-storage/target
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Check Bash syntax
         run: |
           bash -n iac/validate.sh
@@ -181,6 +189,32 @@ jobs:
             exit 1
           fi
 
+  discloud-preflight:
+    name: discloud-preflight
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: validation
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download validated User Storage provider
+        uses: actions/download-artifact@v4
+        with:
+          name: ouros-user-storage-build
+          path: providers/ouros-user-storage/target
+
+
+      - name: Validate Discloud Dockerfile contract
+        run: |
+          grep -Fxc 'FROM quay.io/keycloak/keycloak:26.7.3 AS builder' Dockerfile | grep -qx '1'
+          grep -Fxc 'FROM quay.io/keycloak/keycloak:26.7.3' Dockerfile | grep -qx '1'
+          ! grep -q '^FROM maven:' Dockerfile
+          test -s providers/ouros-user-storage/target/ouros-user-storage-1.0.0.jar
+          docker build -t ouros-keycloak:discloud-preflight .
+          docker image inspect ouros-keycloak:discloud-preflight --format '{{json .Config.Entrypoint}}' | grep -F 'keycloak-entrypoint.sh'
+
   keycloak-integration:
     name: keycloak-iac-integration
     runs-on: ubuntu-latest
@@ -190,13 +224,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Download validated User Storage provider
+        uses: actions/download-artifact@v4
+        with:
+          name: ouros-user-storage-build
+          path: providers/ouros-user-storage/target
+
       - name: Run PostgreSQL + Keycloak integration suite for all client profiles
         run: bash ci/keycloak-integration.sh
 
   sonarcloud:
     name: sonarcloud
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && github.actor != 'dependabot[bot]'
     needs: validation
 
     steps:
@@ -211,8 +251,12 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Run provider tests with JaCoCo
-        run: mvn -B -q -f providers/ouros-user-storage/pom.xml verify
+      - name: Download validated User Storage provider
+        uses: actions/download-artifact@v4
+        with:
+          name: ouros-user-storage-build
+          path: providers/ouros-user-storage/target
+
 
       - name: Configure SonarCloud
         env:
@@ -305,7 +349,7 @@ jobs:
   ci:
     name: ci
     runs-on: ubuntu-latest
-    needs: [validation, keycloak-integration, sonarcloud, codeql]
+    needs: [validation, discloud-preflight, keycloak-integration, sonarcloud, codeql]
     if: always() && (github.event.action != 'labeled' || github.event.label.name == 'rerun-ci')
 
     steps:
@@ -313,20 +357,30 @@ jobs:
         env:
           VALIDATION_RESULT: ${{ needs.validation.result }}
           INTEGRATION_RESULT: ${{ needs.keycloak-integration.result }}
+          DISCLOUD_PREFLIGHT_RESULT: ${{ needs.discloud-preflight.result }}
           SONARCLOUD_RESULT: ${{ needs.sonarcloud.result }}
           CODEQL_RESULT: ${{ needs.codeql.result }}
           EVENT_NAME: ${{ github.event_name }}
+          SONARCLOUD_REQUIRED: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && github.actor != 'dependabot[bot]' }}
         run: |
           echo "validation=${VALIDATION_RESULT}"
           echo "integration=${INTEGRATION_RESULT}"
+          echo "discloud_preflight=${DISCLOUD_PREFLIGHT_RESULT}"
           echo "sonarcloud=${SONARCLOUD_RESULT}"
+          echo "sonarcloud_required=${SONARCLOUD_REQUIRED}"
           echo "codeql=${CODEQL_RESULT}"
 
           test "${VALIDATION_RESULT}" = "success"
           test "${INTEGRATION_RESULT}" = "success"
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
-            test "${SONARCLOUD_RESULT}" = "success"
+            test "${DISCLOUD_PREFLIGHT_RESULT}" = "success"
+            if [[ "${SONARCLOUD_REQUIRED}" == "true" ]]; then
+              test "${SONARCLOUD_RESULT}" = "success"
+            else
+              test "${SONARCLOUD_RESULT}" = "skipped"
+            fi
           else
+            test "${DISCLOUD_PREFLIGHT_RESULT}" = "skipped"
             test "${SONARCLOUD_RESULT}" = "skipped"
           fi
           test "${CODEQL_RESULT}" = "success"
@@ -373,6 +427,12 @@ jobs:
 
           grep -qi '^www-authenticate: Bearer' "${headers}" \
             || { echo "ms-auth-service internal bridge did not return a Bearer challenge." >&2; exit 1; }
+
+      - name: Download validated User Storage provider
+        uses: actions/download-artifact@v4
+        with:
+          name: ouros-user-storage-build
+          path: providers/ouros-user-storage/target
 
       - name: Deploy Ouros Keycloak to Discloud
         uses: discloud/deploy-action@fae7024653d941a19daa2b6f56d2ae208e008c54
