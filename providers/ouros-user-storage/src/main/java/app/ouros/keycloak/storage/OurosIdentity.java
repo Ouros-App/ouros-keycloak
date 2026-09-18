@@ -25,7 +25,10 @@ final class OurosIdentity {
         this.name = nullableText(node, "name");
         this.farmId = nullableLong(node, "farm_id");
         this.enterpriseId = nullableLong(node, "enterprise_id");
-        this.firstAccess = nullableBoolean(node, "first_access");
+        JsonNode firstAccessNode = node.get("first_access");
+        this.firstAccess = firstAccessNode == null || firstAccessNode.isNull()
+                ? null
+                : requiredBoolean(firstAccessNode, "first_access");
     }
 
     static OurosIdentity fromJson(JsonNode node) {
@@ -62,11 +65,7 @@ final class OurosIdentity {
         return value.longValue();
     }
 
-    private static Boolean nullableBoolean(JsonNode node, String field) {
-        JsonNode value = node.get(field);
-        if (value == null || value.isNull()) {
-            return null;
-        }
+    private static boolean requiredBoolean(JsonNode value, String field) {
         if (!value.isBoolean()) {
             throw new IllegalArgumentException("Invalid identity field: " + field);
         }
