@@ -129,7 +129,7 @@ Não configure `KC_DB_PASSWORD` junto de `KCRAW_DB_PASSWORD`.
 
 Se o usuário do IaC autenticar mas responder `HTTP 403` ao reconciliar o realm, configure **temporariamente** os dois secrets `KC_RECOVERY_ADMIN_USERNAME` e `KC_RECOVERY_ADMIN_PASSWORD` e faça um deploy. O entrypoint cria um administrador temporário no realm `master`, concede `realm-management:realm-admin` ao `KC_IAC_ADMIN_USERNAME`, executa a reconciliação com o usuário permanente e remove o administrador temporário ao final.
 
-Os dois secrets de recuperação devem ser removidos do Infisical após o log `[keycloak-iac] reconciliation complete`. Se o startup falhar antes desse ponto, o admin temporário é mantido para permitir diagnóstico; não o reutilize como credencial permanente.
+Mantenha os mesmos dois secrets de recuperação até o log `[keycloak-iac] reconciliation complete`; se uma tentativa falhar após criar o admin temporário, o próximo startup reutiliza essa conta em vez de tentar criá-la novamente. Depois da conclusão, remova os dois secrets do Infisical. Se o startup falhar antes desse ponto, o admin temporário é mantido para permitir diagnóstico; não o reutilize como credencial permanente.
 
 ## Clients as Code
 
