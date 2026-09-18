@@ -85,16 +85,26 @@ docker run -d \
   -e POSTGRES_PASSWORD="${DB_PASSWORD}" \
   postgres:16-alpine >/dev/null
 
-for _ in $(seq 1 45); do
-  if docker exec "${POSTGRES_CONTAINER}" pg_isready -U keycloak -d keycloak >/dev/null 2>&1; then
+postgres_ready=false
+for _ in $(seq 1 60); do
+  if docker logs "${POSTGRES_CONTAINER}" 2>&1 \
+      | grep -q 'PostgreSQL init process complete; ready for start up.' \
+    && docker exec "${POSTGRES_CONTAINER}" pg_isready -U keycloak -d keycloak >/dev/null 2>&1; then
+    postgres_ready=true
     break
   fi
+
+  docker inspect "${POSTGRES_CONTAINER}" --format '{{.State.Running}}' 2>/dev/null \
+    | grep -qx true \
+    || { echo "[integration] PostgreSQL exited unexpectedly" >&2; docker logs "${POSTGRES_CONTAINER}" >&2 || true; exit 1; }
   sleep 1
-  docker inspect "${POSTGRES_CONTAINER}" --format '{{.State.Running}}' | grep -qx true \
-    || { echo "[integration] PostgreSQL exited unexpectedly" >&2; exit 1; }
 done
 
-docker exec "${POSTGRES_CONTAINER}" pg_isready -U keycloak -d keycloak >/dev/null
+if [[ "${postgres_ready}" != true ]]; then
+  echo "[integration] PostgreSQL readiness timed out" >&2
+  docker logs "${POSTGRES_CONTAINER}" >&2 || true
+  exit 1
+fi
 
 echo "[integration] starting Keycloak with all client types"
 docker run -d \
