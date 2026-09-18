@@ -346,6 +346,7 @@ jq -e --arg subject "$(jq -r '.sub' <<< "${login_payload}")" '
   and (.account_type == "farm_owner")
   and (.farm_id == 7)
   and (.first_access == false)
+  and (has("enterprise_id") | not)
 ' <<< "${refreshed_payload}" >/dev/null
 
 echo "[integration] verifying idempotent reconciliation"
