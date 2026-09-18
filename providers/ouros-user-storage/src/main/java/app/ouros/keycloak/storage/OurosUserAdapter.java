@@ -5,6 +5,8 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.RoleModel;
 import org.keycloak.models.UserCredentialManager;
+import org.keycloak.models.UserModel;
+import org.keycloak.storage.ReadOnlyException;
 import org.keycloak.storage.StorageId;
 import org.keycloak.storage.adapter.AbstractUserAdapter;
 
@@ -42,6 +44,22 @@ final class OurosUserAdapter extends AbstractUserAdapter {
     @Override
     public UserCredentialManager credentialManager() {
         return session.users().getUserCredentialManager(this);
+    }
+
+    @Override
+    public void removeRequiredAction(String action) {
+        if (UserModel.RequiredAction.VERIFY_PROFILE.name().equals(action)) {
+            return;
+        }
+        throw new ReadOnlyException("Ouros users are read-only for required-action updates.");
+    }
+
+    @Override
+    public void removeRequiredAction(UserModel.RequiredAction action) {
+        if (action == UserModel.RequiredAction.VERIFY_PROFILE) {
+            return;
+        }
+        throw new ReadOnlyException("Ouros users are read-only for required-action updates.");
     }
 
     @Override
