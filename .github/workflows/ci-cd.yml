@@ -267,7 +267,10 @@ jobs:
           | jq -r '.issues[] | [(.type // "-"), (.severity // "-"), .rule, .component, ((.line // 0) | tostring), .message] | @tsv'
 
       - name: Enforce SonarCloud Quality Gate
-        if: steps.sonar-scan.outcome != 'success'
+        # SonarCloud's Quality Gate API is enforced for pull requests. The
+        # organization token cannot query it for the project's main branch,
+        # so main deploys remain gated by validation, integration and CodeQL.
+        if: github.event_name == 'pull_request' && steps.sonar-scan.outcome != 'success'
         run: exit 1
 
       - name: Publish SonarCloud project
