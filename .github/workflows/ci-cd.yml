@@ -193,7 +193,7 @@ jobs:
   sonarcloud:
     name: sonarcloud
     runs-on: ubuntu-latest
-    needs: [validation, keycloak-integration]
+    needs: validation
 
     steps:
       - name: Checkout
