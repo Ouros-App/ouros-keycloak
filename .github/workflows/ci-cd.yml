@@ -149,6 +149,14 @@ jobs:
       - name: Test User Storage provider
         run: mvn -B -q -f providers/ouros-user-storage/pom.xml verify
 
+      - name: Upload validated User Storage provider
+        uses: actions/upload-artifact@v4
+        with:
+          name: ouros-user-storage-build
+          path: providers/ouros-user-storage/target
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Check Bash syntax
         run: |
           bash -n iac/validate.sh
@@ -191,14 +199,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      - name: Download validated User Storage provider
+        uses: actions/download-artifact@v4
         with:
-          distribution: temurin
-          java-version: "21"
+          name: ouros-user-storage-build
+          path: providers/ouros-user-storage/target
 
-      - name: Build the User Storage provider
-        run: mvn -B -q -f providers/ouros-user-storage/pom.xml package -DskipTests
 
       - name: Validate Discloud Dockerfile contract
         run: |
@@ -218,13 +224,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Download validated User Storage provider
+        uses: actions/download-artifact@v4
+        with:
+          name: ouros-user-storage-build
+          path: providers/ouros-user-storage/target
+
       - name: Run PostgreSQL + Keycloak integration suite for all client profiles
         run: bash ci/keycloak-integration.sh
 
   sonarcloud:
     name: sonarcloud
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && github.actor != 'dependabot[bot]'
     needs: validation
 
     steps:
@@ -239,8 +251,12 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Run provider tests with JaCoCo
-        run: mvn -B -q -f providers/ouros-user-storage/pom.xml verify
+      - name: Download validated User Storage provider
+        uses: actions/download-artifact@v4
+        with:
+          name: ouros-user-storage-build
+          path: providers/ouros-user-storage/target
+
 
       - name: Configure SonarCloud
         env:
@@ -345,18 +361,24 @@ jobs:
           SONARCLOUD_RESULT: ${{ needs.sonarcloud.result }}
           CODEQL_RESULT: ${{ needs.codeql.result }}
           EVENT_NAME: ${{ github.event_name }}
+          SONARCLOUD_REQUIRED: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && github.actor != 'dependabot[bot]' }}
         run: |
           echo "validation=${VALIDATION_RESULT}"
           echo "integration=${INTEGRATION_RESULT}"
           echo "discloud_preflight=${DISCLOUD_PREFLIGHT_RESULT}"
           echo "sonarcloud=${SONARCLOUD_RESULT}"
+          echo "sonarcloud_required=${SONARCLOUD_REQUIRED}"
           echo "codeql=${CODEQL_RESULT}"
 
           test "${VALIDATION_RESULT}" = "success"
           test "${INTEGRATION_RESULT}" = "success"
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
             test "${DISCLOUD_PREFLIGHT_RESULT}" = "success"
-            test "${SONARCLOUD_RESULT}" = "success"
+            if [[ "${SONARCLOUD_REQUIRED}" == "true" ]]; then
+              test "${SONARCLOUD_RESULT}" = "success"
+            else
+              test "${SONARCLOUD_RESULT}" = "skipped"
+            fi
           else
             test "${DISCLOUD_PREFLIGHT_RESULT}" = "skipped"
             test "${SONARCLOUD_RESULT}" = "skipped"
@@ -406,16 +428,11 @@ jobs:
           grep -qi '^www-authenticate: Bearer' "${headers}" \
             || { echo "ms-auth-service internal bridge did not return a Bearer challenge." >&2; exit 1; }
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      - name: Download validated User Storage provider
+        uses: actions/download-artifact@v4
         with:
-          distribution: temurin
-          java-version: "21"
-
-      - name: Build the User Storage provider for Discloud
-        run: |
-          mvn -B -q -f providers/ouros-user-storage/pom.xml package -DskipTests
-          test -s providers/ouros-user-storage/target/ouros-user-storage-1.0.0.jar
+          name: ouros-user-storage-build
+          path: providers/ouros-user-storage/target
 
       - name: Deploy Ouros Keycloak to Discloud
         uses: discloud/deploy-action@fae7024653d941a19daa2b6f56d2ae208e008c54
