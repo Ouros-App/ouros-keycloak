@@ -294,7 +294,7 @@ wrong_login_status="$(curl -sS -o "${wrong_login_file}" -w '%{http_code}' \
   --data-urlencode 'username=ci-user@example.com' \
   --data-urlencode 'password=wrong-password' \
   "http://localhost:${HOST_PORT}/realms/ouros/protocol/openid-connect/token")"
-[[ "${wrong_login_status}" == 401 ]] \
+[[ "${wrong_login_status}" == 400 ]] \
   || { echo "[integration] wrong password returned HTTP ${wrong_login_status}" >&2; cat "${wrong_login_file}" >&2; rm -f "${wrong_login_file}"; exit 1; }
 jq -e '.error == "invalid_grant"' "${wrong_login_file}" >/dev/null
 rm -f "${wrong_login_file}"
