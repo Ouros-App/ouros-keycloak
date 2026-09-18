@@ -4,6 +4,7 @@ set -Eeuo pipefail
 KCADM="/opt/keycloak/bin/kcadm.sh"
 REALM="${KC_IAC_REALM:-ouros}"
 RESOURCE_DIR="${KC_IAC_RESOURCE_DIR:-/opt/keycloak/iac/resources}"
+IDENTITY_SCOPE_NAME="${KC_IAC_IDENTITY_SCOPE_NAME:-ouros-identity}"
 
 kcadm_run() {
   local output status
@@ -218,6 +219,68 @@ ensure_audience_scope() {
   printf '%s' "${scope_uuid}"
 }
 
+ensure_user_attribute_mapper() {
+  local scope_uuid="$1"
+  local attribute_name="$2"
+  local claim_name="$3"
+  local json_type="$4"
+  local mapper_name="ouros-${claim_name}"
+  local mapper_output mapper_uuid
+
+  mapper_output="$(kcadm_run get "client-scopes/${scope_uuid}/protocol-mappers/models" -r "${REALM}"     --fields id,name --format csv --noquotes)"
+  mapper_uuid="$(csv_id_for_value "${mapper_output}" "${mapper_name}")"
+
+  local -a mapper_settings=(
+    -s "name=${mapper_name}"
+    -s protocol=openid-connect
+    -s protocolMapper=oidc-usermodel-attribute-mapper
+    -s "config.\"user.attribute\"=\"${attribute_name}\""
+    -s "config.\"claim.name\"=\"${claim_name}\""
+    -s "config.\"jsonType.label\"=\"${json_type}\""
+    -s 'config."id.token.claim"="false"'
+    -s 'config."access.token.claim"="true"'
+    -s 'config."userinfo.token.claim"="true"'
+    -s 'config."introspection.token.claim"="true"'
+    -s 'config."multivalued"="false"'
+    -s 'config."aggregate.attrs"="false"'
+  )
+
+  if [[ -z "${mapper_uuid}" ]]; then
+    kcadm_run create "client-scopes/${scope_uuid}/protocol-mappers/models" -r "${REALM}"       "${mapper_settings[@]}" >/dev/null
+    echo "[keycloak-iac] created identity mapper ${mapper_name}" >&2
+  else
+    kcadm_run update "client-scopes/${scope_uuid}/protocol-mappers/models/${mapper_uuid}" -r "${REALM}"       "${mapper_settings[@]}" >/dev/null
+    echo "[keycloak-iac] updated identity mapper ${mapper_name}" >&2
+  fi
+}
+
+ensure_identity_scope() {
+  local scope_uuid
+  scope_uuid="$(csv_lookup_id client-scopes name "${IDENTITY_SCOPE_NAME}")"
+
+  if [[ -z "${scope_uuid}" ]]; then
+    kcadm_run create client-scopes -r "${REALM}"       -s "name=${IDENTITY_SCOPE_NAME}"       -s protocol=openid-connect >/dev/null
+    scope_uuid="$(csv_lookup_id client-scopes name "${IDENTITY_SCOPE_NAME}")"
+    echo "[keycloak-iac] created identity scope ${IDENTITY_SCOPE_NAME}" >&2
+  else
+    kcadm_run update "client-scopes/${scope_uuid}" -r "${REALM}"       -s "name=${IDENTITY_SCOPE_NAME}"       -s protocol=openid-connect >/dev/null
+    echo "[keycloak-iac] updated identity scope ${IDENTITY_SCOPE_NAME}" >&2
+  fi
+
+  [[ -n "${scope_uuid}" ]] || {
+    echo "[keycloak-iac] failed to resolve identity scope ${IDENTITY_SCOPE_NAME}" >&2
+    return 1
+  }
+
+  ensure_user_attribute_mapper "${scope_uuid}" database_id database_id long
+  ensure_user_attribute_mapper "${scope_uuid}" account_type account_type String
+  ensure_user_attribute_mapper "${scope_uuid}" farm_id farm_id long
+  ensure_user_attribute_mapper "${scope_uuid}" enterprise_id enterprise_id long
+  ensure_user_attribute_mapper "${scope_uuid}" first_access first_access boolean
+
+  printf '%s' "${scope_uuid}"
+}
+
 attach_default_scope() {
   local client_uuid="$1"
   local scope_uuid="$2"
@@ -316,8 +379,9 @@ reconcile_application() {
   echo "[keycloak-iac] reconciling ${client_type} client ${client_id}"
   client_uuid="$(upsert_base_client "${client_id}" true true "${redirect_json}" "${web_origins_json}" true false)"
   attach_managed_audiences "${client_uuid}" "${client_id}" "${audiences}"
+  attach_default_scope "${client_uuid}" "${identity_scope_uuid}"
 
-  echo "[keycloak-iac] ${client_type} client ${client_id} ready with Authorization Code + PKCE S256"
+  echo "[keycloak-iac] ${client_type} client ${client_id} ready with Authorization Code + PKCE S256 and identity claims"
 }
 
 reconcile_service() {
@@ -343,6 +407,8 @@ if (( ${#resource_files[@]} == 0 )); then
   echo "[keycloak-iac] no managed clients found in ${RESOURCE_DIR}"
   exit 0
 fi
+
+identity_scope_uuid="$(ensure_identity_scope)"
 
 # First create every resource server and its audience scope. Applications and
 # service identities are reconciled afterwards so AUDIENCES references are
