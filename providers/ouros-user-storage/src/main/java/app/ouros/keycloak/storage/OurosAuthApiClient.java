@@ -11,6 +11,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
@@ -38,7 +40,10 @@ final class OurosAuthApiClient {
         this.tokenUrl = tokenUrl;
         this.serviceClientId = serviceClientId;
         this.serviceClientSecret = serviceClientSecret;
-        this.tokenCacheKey = this.authServiceUrl + "\u0000" + tokenUrl + "\u0000" + serviceClientId;
+        this.tokenCacheKey = this.authServiceUrl + "\u0000"
+                + tokenUrl + "\u0000"
+                + serviceClientId + "\u0000"
+                + secretFingerprint(serviceClientSecret);
     }
 
     Optional<OurosIdentity> findByEmail(String email) {
@@ -101,6 +106,11 @@ final class OurosAuthApiClient {
             );
             token = getServiceToken();
             response = send(method, url, body, token);
+            if (isBearerAuthenticationFailure(response)) {
+                throw new StorageUnavailableException(
+                        "Ouros auth service rejected the refreshed Keycloak service token"
+                );
+            }
         }
         return response;
     }
@@ -215,6 +225,17 @@ final class OurosAuthApiClient {
 
     private static String stripTrailingSlash(String value) {
         return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+    }
+
+    private static String secretFingerprint(String secret) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(
+                    secret.getBytes(StandardCharsets.UTF_8)
+            );
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is required by the JVM", exception);
+        }
     }
 
     private record CachedToken(String value, Instant expiresAt) {
