@@ -32,10 +32,27 @@ if [[ -n "${RECOVERY_ADMIN_USERNAME}" || -n "${RECOVERY_ADMIN_PASSWORD}" ]]; the
   # master-realm administrator; it is removed after the permanent IaC admin
   # has received its realm-management role and reconciliation succeeds.
   echo "[keycloak-iac] creating temporary recovery administrator"
-  /opt/keycloak/bin/kc.sh bootstrap-admin user --optimized \
-    --username "${RECOVERY_ADMIN_USERNAME}" \
-    --password:env KC_RECOVERY_ADMIN_PASSWORD \
-    --no-prompt
+  set +e
+  recovery_bootstrap_output="$(
+    /opt/keycloak/bin/kc.sh bootstrap-admin user --optimized \
+      --username "${RECOVERY_ADMIN_USERNAME}" \
+      --password:env KC_RECOVERY_ADMIN_PASSWORD \
+      --no-prompt 2>&1
+  )"
+  recovery_bootstrap_status=$?
+  set -e
+
+  if (( recovery_bootstrap_status != 0 )); then
+    # A previous interrupted recovery may already have created this temporary
+    # user. Reuse it with the same secret; fail closed for every other error.
+    if grep -qiE 'user.*(already )?exists|username.*exists' <<< "${recovery_bootstrap_output}"; then
+      echo "[keycloak-iac] temporary recovery administrator already exists; reusing it"
+    else
+      echo "[keycloak-iac] failed to create temporary recovery administrator" >&2
+      printf '%s\n' "${recovery_bootstrap_output}" >&2
+      exit "${recovery_bootstrap_status}"
+    fi
+  fi
 fi
 
 /opt/keycloak/bin/kc.sh start --optimized --import-realm &
