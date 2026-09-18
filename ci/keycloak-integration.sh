@@ -323,14 +323,18 @@ login_refresh_token="$(jq -r '.refresh_token' <<< "${login_token_json}")"
   || { echo "[integration] external-user refresh token missing" >&2; exit 1; }
 
 login_payload="$(jwt_payload "${login_access_token}")"
-jq -e '(.sub | type) == "string"
+if ! jq -e '(.sub | type) == "string"
   and (.preferred_username == "ci-user@example.com")
   and (.realm_access.roles | index("farm_owner") != null)
   and (.database_id == 42)
   and (.account_type == "farm_owner")
   and (.farm_id == 7)
   and (.first_access == false)
-  and (has("enterprise_id") | not)' <<< "${login_payload}" >/dev/null
+  and (has("enterprise_id") | not)' <<< "${login_payload}" >/dev/null; then
+  echo "[integration] external-user token claims did not match the federated identity" >&2
+  jq . <<< "${login_payload}" >&2
+  exit 1
+fi
 
 echo "[integration] verifying refresh-token flow preserves federated identity"
 refresh_token_json="$(curl -fsS \
