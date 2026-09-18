@@ -119,6 +119,7 @@ upsert_base_client() {
   local web_origins_json="$5"
   local pkce="$6"
   local service_accounts="$7"
+  local direct_access_grants="$8"
 
   local client_uuid
   client_uuid="$(csv_lookup_id clients clientId "${client_id}")"
@@ -130,7 +131,7 @@ upsert_base_client() {
     -s "publicClient=${public_client}"
     -s bearerOnly=false
     -s "standardFlowEnabled=${standard_flow}"
-    -s directAccessGrantsEnabled=false
+    -s "directAccessGrantsEnabled=${direct_access_grants}"
     -s implicitFlowEnabled=false
     -s "serviceAccountsEnabled=${service_accounts}"
     -s authorizationServicesEnabled=false
@@ -146,7 +147,7 @@ upsert_base_client() {
     settings+=( -s 'attributes={}' )
   fi
 
-  if [[ "${service_accounts}" == true ]]; then
+  if [[ "${public_client}" == false ]]; then
     settings+=( -s clientAuthenticatorType=client-secret )
   fi
 
@@ -348,7 +349,7 @@ reconcile_microservice() {
   [[ -n "${client_id}" ]] || { echo "[keycloak-iac] CLIENT_ID missing in ${file}" >&2; return 1; }
 
   echo "[keycloak-iac] reconciling microservice ${client_id}"
-  client_uuid="$(upsert_base_client "${client_id}" true false '[]' '[]' false false)"
+  client_uuid="$(upsert_base_client "${client_id}" true false '[]' '[]' false false false)"
   scope_uuid="$(ensure_audience_scope "${audience}" "${scope_name}" "${mapper_name}")"
   attach_default_scope "${client_uuid}" "${scope_uuid}"
   echo "[keycloak-iac] microservice ${client_id} ready with audience ${audience}"
@@ -377,7 +378,7 @@ reconcile_application() {
   web_origins_json="$(json_array_from_pipe "${web_origins}")"
 
   echo "[keycloak-iac] reconciling ${client_type} client ${client_id}"
-  client_uuid="$(upsert_base_client "${client_id}" true true "${redirect_json}" "${web_origins_json}" true false)"
+  client_uuid="$(upsert_base_client "${client_id}" true true "${redirect_json}" "${web_origins_json}" true false false)"
   attach_managed_audiences "${client_uuid}" "${client_id}" "${audiences}"
   attach_default_scope "${client_uuid}" "${identity_scope_uuid}"
 
@@ -394,10 +395,27 @@ reconcile_service() {
   [[ -n "${client_id}" ]] || { echo "[keycloak-iac] CLIENT_ID missing in ${file}" >&2; return 1; }
 
   echo "[keycloak-iac] reconciling service client ${client_id}"
-  client_uuid="$(upsert_base_client "${client_id}" false false '[]' '[]' false true)"
+  client_uuid="$(upsert_base_client "${client_id}" false false '[]' '[]' false true false)"
   attach_managed_audiences "${client_uuid}" "${client_id}" "${audiences}"
 
   echo "[keycloak-iac] service client ${client_id} ready for Client Credentials"
+}
+
+reconcile_password_broker() {
+  local file="$1"
+  local client_id audiences client_uuid
+
+  client_id="$(config_get "${file}" CLIENT_ID)"
+  audiences="$(config_get "${file}" AUDIENCES)"
+
+  [[ -n "${client_id}" ]] || { echo "[keycloak-iac] CLIENT_ID missing in ${file}" >&2; return 1; }
+
+  echo "[keycloak-iac] reconciling password-grant broker ${client_id}"
+  client_uuid="$(upsert_base_client "${client_id}" false false '[]' '[]' false false true)"
+  attach_managed_audiences "${client_uuid}" "${client_id}" "${audiences}"
+  attach_default_scope "${client_uuid}" "${identity_scope_uuid}"
+
+  echo "[keycloak-iac] password-grant broker ${client_id} ready for internal token relay"
 }
 
 shopt -s nullglob
@@ -417,7 +435,7 @@ for config_file in "${resource_files[@]}"; do
   client_type="$(config_get "${config_file}" CLIENT_TYPE)"
   case "${client_type}" in
     microservice) reconcile_microservice "${config_file}" ;;
-    mobile|web|service) ;;
+    mobile|web|service|password-broker) ;;
     *) echo "[keycloak-iac] unsupported CLIENT_TYPE '${client_type}' in ${config_file}" >&2; exit 1 ;;
   esac
 done
@@ -427,5 +445,6 @@ for config_file in "${resource_files[@]}"; do
   case "${client_type}" in
     mobile|web) reconcile_application "${config_file}" ;;
     service) reconcile_service "${config_file}" ;;
+    password-broker) reconcile_password_broker "${config_file}" ;;
   esac
 done
