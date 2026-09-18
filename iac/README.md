@@ -2,7 +2,7 @@
 
 A pasta `iac/` é a fonte de verdade dos clients gerenciados no realm `ouros`.
 
-Em cada deploy o container sobe o Keycloak, aguarda a Admin API local e executa `sync-clients.sh`. O reconciliador usa o `kcadm.sh` incluído no próprio Keycloak para criar ou atualizar os clients declarados em `iac/resources/`.
+Em cada deploy o container sobe o Keycloak, aguarda a Admin API local e executa `sync-realm.sh`, `sync-clients.sh` e `sync-user-storage.sh`. O reconciliador usa o `kcadm.sh` incluído no próprio Keycloak para manter realm, roles, clients, scopes e o User Storage de forma idempotente.
 
 ## Tipos suportados
 
@@ -81,6 +81,20 @@ AUDIENCES="ms-example-api|ms-another-api"
 
 Valores múltiplos usam `|` como separador. Não use `*` em `WEB_ORIGINS`; mantenha as origens explícitas.
 
+## Claims de identidade
+
+O reconciliador mantém um default client scope chamado `ouros-identity` e o anexa automaticamente aos clients `mobile` e `web` gerenciados. Ele publica somente no access token/userinfo os atributos necessários para a transição do domínio legado:
+
+| Claim | Origem | Tipo |
+| --- | --- | --- |
+| `database_id` | ID da linha no banco legado | `long` |
+| `account_type` | `farm_owner`, `company_employee` ou `admin` | `String` |
+| `farm_id` | fazenda associada, quando existir | `long` |
+| `enterprise_id` | empresa associada, quando existir | `long` |
+| `first_access` | estado legado do primeiro acesso, quando existir | `boolean` |
+
+A role de autorização continua em `realm_access.roles`. O claim `sub` pertence ao Keycloak e não deve ser substituído pelo ID numérico do banco.
+
 ## Fluxo para adicionar um client
 
 1. copie um exemplo de `iac/examples/` para `iac/resources/<client>.conf`;
@@ -114,9 +128,11 @@ AUDIENCES="ms-telemetry-dashboard-service"
 
 recebe `ms-telemetry-dashboard-audience` como default client scope. No access token emitido para esse client, a audience do telemetry passa a aparecer no claim `aud`.
 
-## Service secrets
+## User Storage e service secrets
 
-O IaC não aceita `CLIENT_SECRET` nos arquivos `.conf`. Para `CLIENT_TYPE="service"`, o Keycloak cria e mantém o secret do confidential client. O consumidor deve obter esse valor por um canal operacional seguro, por exemplo no Admin Console ou por automação autorizada, e armazená-lo em um secret manager/variável de ambiente do serviço consumidor.
+O provider `ouros-auth-service` é read-only: lookup e validação de senha passam pelo `ms-auth-service`, mas o Keycloak não altera a senha do banco legado. O client interno `keycloak-user-storage` é criado pelo IaC, recebe apenas a audience `ms-auth-service-internal` e seu secret é lido e injetado diretamente no componente User Storage durante a reconciliação. Esse secret não precisa ser copiado para Git, Infisical ou Discloud.
+
+Para outros `CLIENT_TYPE="service"`, o Keycloak também cria e mantém o secret do confidential client. O consumidor deve obter esse valor por um canal operacional seguro e armazená-lo no secret manager do próprio serviço.
 
 Rotacionar ou distribuir secrets é uma operação diferente da declaração estrutural do client e não deve introduzir credenciais no Git.
 
@@ -151,4 +167,4 @@ bash iac/validate.sh
 shellcheck iac/*.sh scripts/*.sh ci/*.sh
 ```
 
-Os testes de integração da CI sobem PostgreSQL + Keycloak e validam os quatro tipos de client usando `iac/test-fixtures/`, incluindo um token real via Client Credentials para o tipo `service`.
+Os testes de integração da CI sobem PostgreSQL + Keycloak + um auth service simulado e validam os quatro tipos de client, service JWT interno, User Storage, login federado, senha inválida, access token, refresh token, refresh grant, roles, claims de identidade e uma segunda reconciliação sem duplicações. O provider também possui testes unitários Java e cobertura JaCoCo.
