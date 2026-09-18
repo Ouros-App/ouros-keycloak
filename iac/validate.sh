@@ -199,8 +199,16 @@ validate_group() {
 }
 
 command -v jq >/dev/null 2>&1 || fail "jq is required"
-jq -e '.realm == "ouros" and .enabled == true' realm/ouros-realm.json >/dev/null \
-  || fail "realm/ouros-realm.json must define the enabled ouros realm"
+jq -e '
+  .realm == "ouros"
+  and .enabled == true
+  and .sslRequired == "external"
+  and .registrationAllowed == false
+  and .resetPasswordAllowed == false
+  and .verifyEmail == false
+  and .bruteForceProtected == true
+' realm/ouros-realm.json >/dev/null \
+  || fail "realm/ouros-realm.json must define the hardened ouros realm"
 
 grep -qx 'TYPE=site' discloud.config || fail "discloud.config must use TYPE=site"
 grep -qx 'MAIN=Dockerfile' discloud.config || fail "discloud.config must use MAIN=Dockerfile"

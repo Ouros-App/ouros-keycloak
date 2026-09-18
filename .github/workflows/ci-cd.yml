@@ -117,6 +117,7 @@ jobs:
           test -f realm/ouros-realm.json
           test -f iac/validate.sh
           test -f iac/validate-user-storage.sh
+          test -f iac/sync-realm.sh
           test -f iac/sync-clients.sh
           test -f iac/sync-user-storage.sh
           test -f scripts/keycloak-entrypoint.sh
@@ -152,6 +153,7 @@ jobs:
         run: |
           bash -n iac/validate.sh
           bash -n iac/validate-user-storage.sh
+          bash -n iac/sync-realm.sh
           bash -n iac/sync-clients.sh
           bash -n iac/sync-user-storage.sh
           bash -n scripts/keycloak-entrypoint.sh
@@ -161,6 +163,7 @@ jobs:
         run: |
           shellcheck iac/validate.sh
           shellcheck iac/validate-user-storage.sh
+          shellcheck iac/sync-realm.sh
           shellcheck iac/sync-clients.sh
           shellcheck iac/sync-user-storage.sh
           shellcheck scripts/keycloak-entrypoint.sh

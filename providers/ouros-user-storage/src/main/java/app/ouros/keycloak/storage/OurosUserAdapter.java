@@ -74,7 +74,7 @@ final class OurosUserAdapter extends AbstractUserAdapter {
 
     @Override
     public boolean isEmailVerified() {
-        return true;
+        return false;
     }
 
     @Override

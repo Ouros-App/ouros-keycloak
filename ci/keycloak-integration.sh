@@ -163,6 +163,16 @@ kcadm_get() {
     /opt/keycloak/bin/kcadm.sh get "$@"
 }
 
+realm_json="$(kcadm_get realms/ouros)"
+jq -e '
+  .enabled == true
+  and .sslRequired == "external"
+  and .registrationAllowed == false
+  and .resetPasswordAllowed == false
+  and .verifyEmail == false
+  and .bruteForceProtected == true
+' <<< "${realm_json}" >/dev/null
+
 api_json="$(kcadm_get clients -r ouros -q clientId=ci-api)"
 mobile_json="$(kcadm_get clients -r ouros -q clientId=ci-mobile)"
 web_json="$(kcadm_get clients -r ouros -q clientId=ci-web)"
@@ -276,6 +286,7 @@ jq -e '(.sub | type) == "string"
   and (.realm_access.roles | index("farm_owner") != null)' <<< "${login_payload}" >/dev/null
 
 echo "[integration] verifying idempotent reconciliation"
+docker exec "${KEYCLOAK_CONTAINER}" /bin/bash /opt/keycloak/iac/sync-realm.sh >/dev/null
 docker exec "${KEYCLOAK_CONTAINER}" /bin/bash /opt/keycloak/iac/sync-clients.sh >/dev/null
 docker exec "${KEYCLOAK_CONTAINER}" /bin/bash /opt/keycloak/iac/sync-user-storage.sh >/dev/null
 

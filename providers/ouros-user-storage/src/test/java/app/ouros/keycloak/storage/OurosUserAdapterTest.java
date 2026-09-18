@@ -56,7 +56,7 @@ class OurosUserAdapterTest {
         assertEquals("f:provider-id:farm_owner:42", adapter.getId());
         assertEquals("user@example.com", adapter.getUsername());
         assertEquals("user@example.com", adapter.getEmail());
-        assertTrue(adapter.isEmailVerified());
+        assertFalse(adapter.isEmailVerified());
         assertEquals("User", adapter.getFirstName());
         assertEquals("Test", adapter.getLastName());
         assertSame(identity, adapter.identity());

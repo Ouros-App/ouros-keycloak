@@ -59,6 +59,7 @@ done
 unset KC_CLI_PASSWORD
 
 echo "[keycloak-iac] Admin API ready; reconciling managed resources"
+bash /opt/keycloak/iac/sync-realm.sh
 bash /opt/keycloak/iac/sync-clients.sh
 bash /opt/keycloak/iac/sync-user-storage.sh
 
