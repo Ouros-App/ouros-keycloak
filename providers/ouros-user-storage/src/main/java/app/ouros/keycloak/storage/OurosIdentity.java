@@ -12,34 +12,24 @@ final class OurosIdentity {
     private final Long enterpriseId;
     private final Boolean firstAccess;
 
-    private OurosIdentity(long databaseId, String email, String accountType, String realmRole,
-                          String name, Long farmId, Long enterpriseId, Boolean firstAccess) {
-        this.databaseId = databaseId;
-        this.email = email;
-        this.accountType = accountType;
-        this.realmRole = realmRole;
-        this.name = name;
-        this.farmId = farmId;
-        this.enterpriseId = enterpriseId;
-        this.firstAccess = firstAccess;
-    }
-
-    static OurosIdentity fromJson(JsonNode node) {
+    private OurosIdentity(JsonNode node) {
         JsonNode id = node.get("id");
         if (id == null || !id.isIntegralNumber() || !id.canConvertToLong()) {
             throw new IllegalArgumentException("Missing or invalid identity field: id");
         }
 
-        return new OurosIdentity(
-                id.longValue(),
-                requiredText(node, "email"),
-                requiredText(node, "account_type"),
-                requiredText(node, "realm_role"),
-                nullableText(node, "name"),
-                nullableLong(node, "farm_id"),
-                nullableLong(node, "enterprise_id"),
-                nullableBoolean(node, "first_access")
-        );
+        this.databaseId = id.longValue();
+        this.email = requiredText(node, "email");
+        this.accountType = requiredText(node, "account_type");
+        this.realmRole = requiredText(node, "realm_role");
+        this.name = nullableText(node, "name");
+        this.farmId = nullableLong(node, "farm_id");
+        this.enterpriseId = nullableLong(node, "enterprise_id");
+        this.firstAccess = nullableBoolean(node, "first_access");
+    }
+
+    static OurosIdentity fromJson(JsonNode node) {
+        return new OurosIdentity(node);
     }
 
     private static String requiredText(JsonNode node, String field) {

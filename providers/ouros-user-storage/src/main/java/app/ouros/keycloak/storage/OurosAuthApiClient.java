@@ -21,6 +21,7 @@ import java.util.concurrent.ConcurrentHashMap;
 final class OurosAuthApiClient {
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(5);
     private static final Duration TOKEN_SAFETY_MARGIN = Duration.ofSeconds(15);
+    private static final String APPLICATION_JSON = "application/json";
     private static final Map<String, CachedToken> TOKEN_CACHE = new ConcurrentHashMap<>();
 
     private final HttpClient httpClient;
@@ -114,13 +115,13 @@ final class OurosAuthApiClient {
         try {
             HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(url))
                     .timeout(REQUEST_TIMEOUT)
-                    .header("Accept", "application/json")
+                    .header("Accept", APPLICATION_JSON)
                     .header("Authorization", "Bearer " + bearerToken);
 
             if (body == null) {
                 request.method(method, HttpRequest.BodyPublishers.noBody());
             } else {
-                request.header("Content-Type", "application/json")
+                request.header("Content-Type", APPLICATION_JSON)
                         .method(method, HttpRequest.BodyPublishers.ofString(body));
             }
 
@@ -159,7 +160,7 @@ final class OurosAuthApiClient {
         try {
             HttpRequest request = HttpRequest.newBuilder(URI.create(tokenUrl))
                     .timeout(REQUEST_TIMEOUT)
-                    .header("Accept", "application/json")
+                    .header("Accept", APPLICATION_JSON)
                     .header("Authorization", "Basic " + basic)
                     .header("Content-Type", "application/x-www-form-urlencoded")
                     .POST(HttpRequest.BodyPublishers.ofString("grant_type=client_credentials"))
