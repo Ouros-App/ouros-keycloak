@@ -30,7 +30,7 @@ if [[ -n "${RECOVERY_ADMIN_USERNAME}" || -n "${RECOVERY_ADMIN_PASSWORD}" ]]; the
 
   # Recovery must happen while Keycloak is stopped. This creates a temporary
   # master-realm administrator; it is removed after the permanent IaC admin
-  # has received its realm-management role and reconciliation succeeds.
+  # has received the master realm admin role and reconciliation succeeds.
   echo "[keycloak-iac] creating temporary recovery administrator"
   set +e
   recovery_bootstrap_output="$(
@@ -98,11 +98,10 @@ authenticate_kcadm() {
 if [[ -n "${RECOVERY_ADMIN_USERNAME}" ]]; then
   authenticate_kcadm "${RECOVERY_ADMIN_USERNAME}" "${RECOVERY_ADMIN_PASSWORD}"
 
-  echo "[keycloak-iac] granting realm-management realm-admin to ${IAC_ADMIN_USERNAME}"
+  echo "[keycloak-iac] granting master realm admin to ${IAC_ADMIN_USERNAME}"
   /opt/keycloak/bin/kcadm.sh add-roles -r master \
     --uusername "${IAC_ADMIN_USERNAME}" \
-    --cclientid realm-management \
-    --rolename realm-admin >/dev/null
+    --rolename admin >/dev/null
 
   # Do not keep using the recovery identity. Prove that the permanent
   # credential can administer the target realm before IaC is executed.

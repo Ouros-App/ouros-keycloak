@@ -101,7 +101,7 @@ Use `.env.example` como referência. As principais variáveis são:
 | Variável | Uso |
 | --- | --- |
 | `KC_BOOTSTRAP_ADMIN_USERNAME` / `KC_BOOTSTRAP_ADMIN_PASSWORD` | Criação do administrador temporário no primeiro bootstrap. |
-| `KC_IAC_ADMIN_USERNAME` / `KC_IAC_ADMIN_PASSWORD` | Administrador permanente do realm `master`, com a role de client `realm-management:realm-admin`. |
+| `KC_IAC_ADMIN_USERNAME` / `KC_IAC_ADMIN_PASSWORD` | Administrador permanente do realm `master`, com a realm role `admin`. |
 | `KC_RECOVERY_ADMIN_USERNAME` / `KC_RECOVERY_ADMIN_PASSWORD` | Uso emergencial, em par: recupera a role administrativa do IaC e remove o admin temporário ao fim do startup. |
 | `KC_IAC_REALM` | Realm gerenciado pelo IaC; padrão esperado: `ouros`. |
 | `KC_HOSTNAME` | URL pública do Keycloak. |
@@ -127,7 +127,7 @@ Não configure `KC_DB_PASSWORD` junto de `KCRAW_DB_PASSWORD`.
 
 ### Recuperação de acesso administrativo
 
-Se o usuário do IaC autenticar mas responder `HTTP 403` ao reconciliar o realm, configure **temporariamente** os dois secrets `KC_RECOVERY_ADMIN_USERNAME` e `KC_RECOVERY_ADMIN_PASSWORD` e faça um deploy. O entrypoint cria um administrador temporário no realm `master`, concede `realm-management:realm-admin` ao `KC_IAC_ADMIN_USERNAME`, executa a reconciliação com o usuário permanente e remove o administrador temporário ao final.
+Se o usuário do IaC autenticar mas responder `HTTP 403` ao reconciliar o realm, configure **temporariamente** os dois secrets `KC_RECOVERY_ADMIN_USERNAME` e `KC_RECOVERY_ADMIN_PASSWORD` e faça um deploy. O entrypoint cria um administrador temporário no realm `master`, concede a realm role `admin` ao `KC_IAC_ADMIN_USERNAME`, executa a reconciliação com o usuário permanente e remove o administrador temporário ao final.
 
 Mantenha os mesmos dois secrets de recuperação até o log `[keycloak-iac] reconciliation complete`; se uma tentativa falhar após criar o admin temporário, o próximo startup reutiliza essa conta em vez de tentar criá-la novamente. Depois da conclusão, remova os dois secrets do Infisical. Se o startup falhar antes desse ponto, o admin temporário é mantido para permitir diagnóstico; não o reutilize como credencial permanente.
 
