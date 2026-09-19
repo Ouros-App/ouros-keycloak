@@ -116,12 +116,19 @@ bash /opt/keycloak/iac/sync-clients.sh
 bash /opt/keycloak/iac/sync-user-storage.sh
 
 if [[ -n "${RECOVERY_ADMIN_USERNAME}" ]]; then
-  recovery_user_id="$(
+  recovery_user_response="$(
     /opt/keycloak/bin/kcadm.sh get users -r master \
       -q "username=${RECOVERY_ADMIN_USERNAME}" \
-      --fields id,username --format csv --noquotes \
-    | awk -F, -v username="${RECOVERY_ADMIN_USERNAME}" '$2 == username { print $1; exit }'
+      --fields id
   )"
+
+  # The Keycloak production image intentionally omits awk and other utility
+  # packages. Extract the single user id with Bash itself so cleanup works in
+  # the same minimal image used by Discloud.
+  recovery_user_id=""
+  if [[ "${recovery_user_response}" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
+    recovery_user_id="${BASH_REMATCH[1]}"
+  fi
 
   if [[ -z "${recovery_user_id}" ]]; then
     echo "[keycloak-iac] recovery admin could not be found for cleanup" >&2
