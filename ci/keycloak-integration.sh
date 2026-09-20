@@ -173,7 +173,7 @@ docker run -d \
   "${IMAGE}" >/dev/null
 
 ready=false
-for _ in $(seq 1 90); do
+for _ in $(seq 1 150); do
   if curl -fsS "http://localhost:${HOST_PORT}/realms/ouros/.well-known/openid-configuration" >/dev/null 2>&1 \
     && docker logs "${KEYCLOAK_CONTAINER}" 2>&1 | grep -q '\[keycloak-iac\] reconciliation complete'; then
     ready=true
