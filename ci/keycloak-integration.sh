@@ -55,6 +55,40 @@ jwt_payload() {
   printf '%s%s' "${segment}" "${padding}" | base64 --decode
 }
 
+verify_jwt_with_jwks() {
+  local token="$1"
+  local audience="$2"
+
+  docker exec -i \
+    -e JWT_TOKEN="${token}" \
+    -e JWT_ISSUER="http://localhost:${HOST_PORT}/realms/ouros" \
+    -e JWT_AUDIENCE="${audience}" \
+    -e JWT_JWKS_URL="http://${KEYCLOAK_CONTAINER}:8080/realms/ouros/protocol/openid-connect/certs" \
+    "${AUTH_CONTAINER}" python - <<'PY'
+import json
+import os
+
+import jwt
+from jwt import PyJWKClient
+
+token = os.environ["JWT_TOKEN"]
+jwks_url = os.environ["JWT_JWKS_URL"]
+issuer = os.environ["JWT_ISSUER"]
+audience = os.environ["JWT_AUDIENCE"]
+
+signing_key = PyJWKClient(jwks_url).get_signing_key_from_jwt(token)
+claims = jwt.decode(
+    token,
+    signing_key.key,
+    algorithms=["RS256"],
+    issuer=issuer,
+    audience=audience,
+    options={"require": ["exp", "iat", "iss", "aud", "sub"]},
+)
+print(json.dumps(claims, separators=(",", ":")))
+PY
+}
+
 command -v docker >/dev/null 2>&1 || { echo "docker is required" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
@@ -83,6 +117,9 @@ docker run -d \
   -v "${PWD}:/workspace:ro" \
   python:3.12-alpine \
   python /workspace/ci/mock-auth-service.py >/dev/null
+
+docker exec "${AUTH_CONTAINER}" \
+  pip install --quiet --disable-pip-version-check 'PyJWT[crypto]==2.14.0'
 
 echo "[integration] starting PostgreSQL"
 docker run -d \
@@ -382,7 +419,7 @@ phase3_access_token="$(jq -r '.access_token' <<< "${phase3_token_json}")"
 [[ -n "${phase3_access_token}" && "${phase3_access_token}" != null ]] \
   || { echo "[integration] Phase 3 broker access token missing" >&2; exit 1; }
 
-phase3_payload="$(jwt_payload "${phase3_access_token}")"
+phase3_payload="$(verify_jwt_with_jwks "${phase3_access_token}" "ms-ai-server")"
 if ! jq -e '
   def has_aud($name):
     if (.aud | type) == "array"
