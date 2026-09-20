@@ -277,15 +277,6 @@ jobs:
             # the pull-request metadata on PR analysis.
           } > sonar-project.properties
 
-      - name: Disable Automatic Analysis via API
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: |
-          project_key="$(grep '^sonar.projectKey=' sonar-project.properties | cut -d= -f2-)"
-          curl -sS -u "${SONAR_TOKEN}:" -X POST "https://sonarcloud.io/api/projects/update_default_analysis_configuration" \
-            -d "project=${project_key}" \
-            -d "autoScan=false"
-
       - name: SonarCloud Scan
         id: sonar-scan
         continue-on-error: true
@@ -317,15 +308,6 @@ jobs:
         # so main deploys remain gated by validation, integration and CodeQL.
         if: github.event_name == 'pull_request' && steps.sonar-scan.outcome != 'success'
         run: exit 1
-
-      - name: Publish SonarCloud project
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: |
-          project_key="$(grep '^sonar.projectKey=' sonar-project.properties | cut -d= -f2-)"
-          curl -sS -u "${SONAR_TOKEN}:" -X POST "https://sonarcloud.io/api/projects/update_visibility" \
-            -d "project=${project_key}" \
-            -d "visibility=public"
 
   codeql:
     name: codeql
