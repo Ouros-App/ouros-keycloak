@@ -354,6 +354,58 @@ if ! jq -e '(.sub | type) == "string"
   exit 1
 fi
 
+echo "[integration] verifying Phase 3 first-party broker token contract"
+phase3_broker_json="$(kcadm_get clients -r ouros -q clientId=ci-phase3-auth-broker)"
+phase3_broker_uuid="$(jq -r '.[0].id' <<< "${phase3_broker_json}")"
+[[ -n "${phase3_broker_uuid}" && "${phase3_broker_uuid}" != null ]] \
+  || { echo "[integration] Phase 3 broker client missing" >&2; exit 1; }
+jq -e 'length == 1
+  and .[0].publicClient == false
+  and .[0].standardFlowEnabled == false
+  and .[0].directAccessGrantsEnabled == true
+  and .[0].serviceAccountsEnabled == false
+  and .[0].clientAuthenticatorType == "client-secret"' \
+  <<< "${phase3_broker_json}" >/dev/null
+
+phase3_broker_secret="$(kcadm_get "clients/${phase3_broker_uuid}/client-secret" -r ouros | jq -r '.value')"
+[[ -n "${phase3_broker_secret}" && "${phase3_broker_secret}" != null ]] \
+  || { echo "[integration] Phase 3 broker secret missing" >&2; exit 1; }
+
+phase3_token_json="$(curl -fsS \
+  -u "ci-phase3-auth-broker:${phase3_broker_secret}" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'grant_type=password' \
+  --data-urlencode 'username=ci-user@example.com' \
+  --data-urlencode 'password=ci-password' \
+  "http://localhost:${HOST_PORT}/realms/ouros/protocol/openid-connect/token")"
+phase3_access_token="$(jq -r '.access_token' <<< "${phase3_token_json}")"
+[[ -n "${phase3_access_token}" && "${phase3_access_token}" != null ]] \
+  || { echo "[integration] Phase 3 broker access token missing" >&2; exit 1; }
+
+phase3_payload="$(jwt_payload "${phase3_access_token}")"
+if ! jq -e '
+  def has_aud($name):
+    if (.aud | type) == "array"
+    then (.aud | index($name)) != null
+    else .aud == $name
+    end;
+  (.sub | type) == "string"
+  and has_aud("ms-spring-api")
+  and has_aud("ms-telemetry-dashboard-service")
+  and has_aud("ms-ai-server")
+  and has_aud("ms-mcp-server-ouros-knowledge")
+  and has_aud("ms-mcp-server-ouros-knowledge-codemode")
+  and (.realm_access.roles | index("farm_owner") != null)
+  and (.database_id == 42)
+  and (.account_type == "farm_owner")
+  and (.farm_id == 7)
+  and (.first_access == false)
+' <<< "${phase3_payload}" >/dev/null; then
+  echo "[integration] Phase 3 broker token contract mismatch" >&2
+  jq . <<< "${phase3_payload}" >&2
+  exit 1
+fi
+
 echo "[integration] verifying refresh-token flow preserves federated identity"
 refresh_token_json="$(curl -fsS \
   -H 'Content-Type: application/x-www-form-urlencoded' \
