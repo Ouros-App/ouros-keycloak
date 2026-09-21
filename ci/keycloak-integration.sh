@@ -419,14 +419,19 @@ phase3_access_token="$(jq -r '.access_token' <<< "${phase3_token_json}")"
 [[ -n "${phase3_access_token}" && "${phase3_access_token}" != null ]] \
   || { echo "[integration] Phase 3 broker access token missing" >&2; exit 1; }
 
+phase3_user_json="$(kcadm_get users -r ouros -q username=ci-user@example.com)"
+phase3_user_id="$(jq -r 'if length == 1 then .[0].id else empty end' <<< "${phase3_user_json}")"
+[[ -n "${phase3_user_id}" && "${phase3_user_id}" != null ]] \
+  || { echo "[integration] Phase 3 federated Keycloak user not uniquely resolved" >&2; exit 1; }
+
 phase3_payload="$(verify_jwt_with_jwks "${phase3_access_token}" "ms-ai-server")"
-if ! jq -e '
+if ! jq -e --arg subject "${phase3_user_id}" '
   def has_aud($name):
     if (.aud | type) == "array"
     then (.aud | index($name)) != null
     else .aud == $name
     end;
-  (.sub | type) == "string"
+  (.sub == $subject)
   and has_aud("ms-spring-api")
   and has_aud("ms-telemetry-dashboard-service")
   and has_aud("ms-ai-server")
