@@ -267,8 +267,10 @@ validate_mobile_client_contract() {
     || fail "${mobile_file}: CLIENT_ID must remain ouros-mobile"
 
   redirects="$(config_get "${mobile_file}" REDIRECT_URIS)"
-  [[ "${redirects}" == *"com.ourosapp.ourosandroidapp:/oauth2redirect"* ]] \
-    || fail "${mobile_file}: Android redirect URI is required"
+  [[ "|${redirects}|" == *"|com.ourosapp.ourosandroidapp:/oauth2redirect|"* ]] \
+    || fail "${mobile_file}: exact Android redirect URI is required"
+  [[ "|${redirects}|" == *"|http://127.0.0.1:8765/callback|"* ]] \
+    || fail "${mobile_file}: exact E2E loopback redirect URI is required"
 
   actual="$(config_get "${mobile_file}" AUDIENCES)"
   actual_sorted="$(tr '|' '\n' <<< "${actual}" | sed '/^$/d' | sort -u | paste -sd'|' -)"
