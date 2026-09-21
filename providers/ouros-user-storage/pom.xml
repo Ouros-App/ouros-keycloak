@@ -14,9 +14,16 @@
         <junit.version>5.11.4</junit.version>
         <mockito.version>5.14.2</mockito.version>
         <mockwebserver.version>4.12.0</mockwebserver.version>
+        <jakarta.ws.rs.version>3.1.0</jakarta.ws.rs.version>
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>jakarta.ws.rs</groupId>
+            <artifactId>jakarta.ws.rs-api</artifactId>
+            <version>${jakarta.ws.rs.version}</version>
+            <scope>provided</scope>
+        </dependency>
         <dependency>
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-core</artifactId>
