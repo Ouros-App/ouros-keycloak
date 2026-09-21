@@ -4,22 +4,8 @@ set -Eeuo pipefail
 KCADM="/opt/keycloak/bin/kcadm.sh"
 REALM="${KC_IAC_REALM:-ouros}"
 FLOW_ALIAS="ouros-browser-email-otp"
+FALLBACK_FLOW_ALIAS="${OUROS_EMAIL_OTP_FALLBACK_BROWSER_FLOW:-browser}"
 ENABLED="${OUROS_EMAIL_OTP_ENABLED:-false}"
-
-if [[ "${ENABLED}" != "true" && "${ENABLED}" != "false" ]]; then
-  echo "[keycloak-iac] OUROS_EMAIL_OTP_ENABLED must be true or false" >&2
-  exit 1
-fi
-
-if [[ "${ENABLED}" != "true" ]]; then
-  echo "[keycloak-iac] email OTP browser flow is disabled"
-  exit 0
-fi
-
-if [[ -z "${OUROS_SMTP_HOST:-}" ]]; then
-  echo "[keycloak-iac] OUROS_EMAIL_OTP_ENABLED=true requires OUROS_SMTP_HOST" >&2
-  exit 1
-fi
 
 kcadm_run() {
   local output status
@@ -36,11 +22,37 @@ kcadm_run() {
 }
 
 flow_exists() {
+  local alias="$1"
   kcadm_run get authentication/flows -r "${REALM}" --fields alias --format csv --noquotes \
-    | grep -Fxq "${FLOW_ALIAS}"
+    | grep -Fxq "${alias}"
 }
 
-if ! flow_exists; then
+if [[ "${ENABLED}" != "true" && "${ENABLED}" != "false" ]]; then
+  echo "[keycloak-iac] OUROS_EMAIL_OTP_ENABLED must be true or false" >&2
+  exit 1
+fi
+
+if [[ "${ENABLED}" != "true" ]]; then
+  current_browser_flow="$(kcadm_run get "realms/${REALM}" --fields browserFlow --format csv --noquotes)"
+  if [[ "${current_browser_flow}" == "${FLOW_ALIAS}" ]]; then
+    if ! flow_exists "${FALLBACK_FLOW_ALIAS}"; then
+      echo "[keycloak-iac] fallback browser flow ${FALLBACK_FLOW_ALIAS} does not exist" >&2
+      exit 1
+    fi
+    kcadm_run update "realms/${REALM}" -s "browserFlow=${FALLBACK_FLOW_ALIAS}" >/dev/null
+    echo "[keycloak-iac] email OTP disabled; restored browser flow ${FALLBACK_FLOW_ALIAS}"
+  else
+    echo "[keycloak-iac] email OTP disabled; browser flow already uses ${current_browser_flow}"
+  fi
+  exit 0
+fi
+
+if [[ -z "${OUROS_SMTP_HOST:-}" ]]; then
+  echo "[keycloak-iac] OUROS_EMAIL_OTP_ENABLED=true requires OUROS_SMTP_HOST" >&2
+  exit 1
+fi
+
+if ! flow_exists "${FLOW_ALIAS}"; then
   kcadm_run create authentication/flows -r "${REALM}" \
     -s "alias=${FLOW_ALIAS}" \
     -s "description=Ouros browser login with password and email OTP" \
