@@ -251,6 +251,7 @@ api_json="$(kcadm_get clients -r ouros -q clientId=ci-api)"
 mobile_json="$(kcadm_get clients -r ouros -q clientId=ci-mobile)"
 web_json="$(kcadm_get clients -r ouros -q clientId=ci-web)"
 service_json="$(kcadm_get clients -r ouros -q clientId=ci-service)"
+token_exchange_json="$(kcadm_get clients -r ouros -q clientId=ci-token-exchange)"
 auth_api_json="$(kcadm_get clients -r ouros -q clientId=ci-auth-api)"
 debug_grant_json="$(kcadm_get clients -r ouros -q clientId=ci-debug-password-grant)"
 user_storage_service_json="$(kcadm_get clients -r ouros -q clientId=ci-user-storage)"
@@ -259,6 +260,14 @@ jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled ==
 jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == true and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == false and .[0].attributes["pkce.code.challenge.method"] == "S256" and (.[0].redirectUris | index("com.ouros.ci:/oauth2redirect") != null)' <<< "${mobile_json}" >/dev/null
 jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == true and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == false and .[0].attributes["pkce.code.challenge.method"] == "S256" and (.[0].redirectUris | index("https://ci.example.invalid/*") != null) and (.[0].webOrigins | index("https://ci.example.invalid") != null)' <<< "${web_json}" >/dev/null
 jq -e 'length == 1 and .[0].publicClient == false and .[0].standardFlowEnabled == false and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == true and .[0].clientAuthenticatorType == "client-secret"' <<< "${service_json}" >/dev/null
+jq -e 'length == 1
+  and .[0].publicClient == false
+  and .[0].standardFlowEnabled == false
+  and .[0].directAccessGrantsEnabled == false
+  and .[0].implicitFlowEnabled == false
+  and .[0].serviceAccountsEnabled == false
+  and .[0].clientAuthenticatorType == "client-secret"
+  and .[0].attributes["standard.token.exchange.enabled"] == "true"' <<< "${token_exchange_json}" >/dev/null
 jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == false and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == false' <<< "${auth_api_json}" >/dev/null
 jq -e 'length == 1 and .[0].publicClient == false and .[0].standardFlowEnabled == false and .[0].directAccessGrantsEnabled == true and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == false and .[0].clientAuthenticatorType == "client-secret"' <<< "${debug_grant_json}" >/dev/null
 jq -e 'length == 1 and .[0].publicClient == false and .[0].standardFlowEnabled == false and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == true and .[0].clientAuthenticatorType == "client-secret"' <<< "${user_storage_service_json}" >/dev/null
@@ -267,6 +276,7 @@ api_uuid="$(jq -r '.[0].id' <<< "${api_json}")"
 mobile_uuid="$(jq -r '.[0].id' <<< "${mobile_json}")"
 web_uuid="$(jq -r '.[0].id' <<< "${web_json}")"
 service_uuid="$(jq -r '.[0].id' <<< "${service_json}")"
+token_exchange_uuid="$(jq -r '.[0].id' <<< "${token_exchange_json}")"
 auth_api_uuid="$(jq -r '.[0].id' <<< "${auth_api_json}")"
 debug_grant_uuid="$(jq -r '.[0].id' <<< "${debug_grant_json}")"
 user_storage_service_uuid="$(jq -r '.[0].id' <<< "${user_storage_service_json}")"
@@ -294,6 +304,7 @@ jq -e '
 mobile_scopes="$(kcadm_get "clients/${mobile_uuid}/default-client-scopes" -r ouros)"
 web_scopes="$(kcadm_get "clients/${web_uuid}/default-client-scopes" -r ouros)"
 service_scopes="$(kcadm_get "clients/${service_uuid}/default-client-scopes" -r ouros)"
+token_exchange_scopes="$(kcadm_get "clients/${token_exchange_uuid}/default-client-scopes" -r ouros)"
 api_scopes="$(kcadm_get "clients/${api_uuid}/default-client-scopes" -r ouros)"
 auth_api_scopes="$(kcadm_get "clients/${auth_api_uuid}/default-client-scopes" -r ouros)"
 debug_grant_scopes="$(kcadm_get "clients/${debug_grant_uuid}/default-client-scopes" -r ouros)"
@@ -304,6 +315,8 @@ jq -e '.[] | select(.name == "ouros-identity")' <<< "${mobile_scopes}" >/dev/nul
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${web_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ouros-identity")' <<< "${web_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${service_scopes}" >/dev/null
+jq -e '.[] | select(.name == "ci-api-audience")' <<< "${token_exchange_scopes}" >/dev/null
+jq -e '.[] | select(.name == "ouros-identity")' <<< "${token_exchange_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${api_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ci-auth-api-audience")' <<< "${auth_api_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${debug_grant_scopes}" >/dev/null
@@ -441,14 +454,48 @@ jq -e '
   and (.account_type == "farm_owner")
   and (
     if (.aud | type) == "array" then
-      (.aud | index("ci-api")) != null
+      (.aud | index("ci-token-exchange")) != null
       and (.aud | index("ci-auth-api")) != null
-      and all(.aud[]; . == "ci-api" or . == "ci-auth-api" or . == "account")
+      and (.aud | index("ci-api")) == null
+      and all(.aud[]; . == "ci-token-exchange" or . == "ci-auth-api" or . == "account")
     else
       false
     end
   )
 ' <<< "${debug_grant_payload}" >/dev/null
+
+echo "[integration] verifying Standard Token Exchange v2 delegation"
+token_exchange_secret="$(kcadm_get "clients/${token_exchange_uuid}/client-secret" -r ouros | jq -r '.value')"
+[[ -n "${token_exchange_secret}" && "${token_exchange_secret}" != null ]] \
+  || { echo "[integration] token-exchange client secret missing" >&2; exit 1; }
+
+exchanged_token_json="$(curl -fsS \
+  -u "ci-token-exchange:${token_exchange_secret}" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+  --data-urlencode "subject_token=${debug_grant_access_token}" \
+  --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:access_token' \
+  --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+  --data-urlencode 'audience=ci-api' \
+  "http://localhost:${HOST_PORT}/realms/ouros/protocol/openid-connect/token")"
+exchanged_access_token="$(jq -r '.access_token' <<< "${exchanged_token_json}")"
+[[ -n "${exchanged_access_token}" && "${exchanged_access_token}" != null ]] \
+  || { echo "[integration] exchanged access token missing" >&2; exit 1; }
+
+exchanged_payload="$(verify_jwt_with_jwks "${exchanged_access_token}" "ci-api")"
+jq -e '
+  (.azp == "ci-token-exchange")
+  and (.preferred_username == "ci-user@example.com")
+  and (.database_id == 42)
+  and (.account_type == "farm_owner")
+  and (.realm_access.roles | index("farm_owner") != null)
+  and (
+    if (.aud | type) == "array"
+    then (.aud | index("ci-api")) != null and (.aud | index("ci-token-exchange")) == null
+    else .aud == "ci-api"
+    end
+  )
+' <<< "${exchanged_payload}" >/dev/null
 
 echo "[integration] verifying Phase 3 first-party broker token contract"
 phase3_broker_json="$(kcadm_get clients -r ouros -q clientId=ci-phase3-auth-broker)"
@@ -489,7 +536,8 @@ if ! jq -e '
   and has_aud("ms-spring-api")
   and has_aud("ms-telemetry-dashboard-service")
   and has_aud("ms-ai-server")
-  and has_aud("ms-mcp-server-ouros-knowledge")
+  and has_aud("ms-ai-server-mcp-exchange")
+  and (has_aud("ms-mcp-server-ouros-knowledge") | not)
   and has_aud("ms-mcp-server-ouros-knowledge-codemode")
   and (.realm_access.roles | index("farm_owner") != null)
   and (.database_id == 42)
