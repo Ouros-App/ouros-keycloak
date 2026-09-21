@@ -254,9 +254,33 @@ validate_debug_console_contract() {
     || fail "${debug_file}: AUDIENCES must allow the AI Server and its standard MCP resource"
 }
 
+validate_mobile_client_contract() {
+  local mobile_file="iac/resources/ouros-mobile.conf"
+  local actual expected actual_sorted expected_sorted redirects
+
+  expected="ms-spring-api|ms-ai-server|ms-telemetry-dashboard-service"
+
+  [[ -f "${mobile_file}" ]] || fail "${mobile_file}: official mobile client declaration is required"
+  [[ "$(config_get "${mobile_file}" CLIENT_TYPE)" == "mobile" ]] \
+    || fail "${mobile_file}: CLIENT_TYPE must remain mobile"
+  [[ "$(config_get "${mobile_file}" CLIENT_ID)" == "ouros-mobile" ]] \
+    || fail "${mobile_file}: CLIENT_ID must remain ouros-mobile"
+
+  redirects="$(config_get "${mobile_file}" REDIRECT_URIS)"
+  [[ "${redirects}" == *"com.ourosapp.ourosandroidapp:/oauth2redirect"* ]] \
+    || fail "${mobile_file}: Android redirect URI is required"
+
+  actual="$(config_get "${mobile_file}" AUDIENCES)"
+  actual_sorted="$(tr '|' '\n' <<< "${actual}" | sed '/^$/d' | sort -u | paste -sd'|' -)"
+  expected_sorted="$(tr '|' '\n' <<< "${expected}" | sort -u | paste -sd'|' -)"
+  [[ "${actual_sorted}" == "${expected_sorted}" ]] \
+    || fail "${mobile_file}: AUDIENCES must contain the complete mobile resource-server set"
+}
+
 validate_group iac/resources '*.conf' production false
 validate_first_party_broker_contract
 validate_debug_console_contract
+validate_mobile_client_contract
 validate_group iac/examples '*.conf.example' examples true
 validate_group iac/test-fixtures '*.conf' test-fixtures true
 
