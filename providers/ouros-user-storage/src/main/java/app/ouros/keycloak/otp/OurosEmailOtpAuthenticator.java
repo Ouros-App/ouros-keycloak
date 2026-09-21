@@ -27,6 +27,7 @@ public final class OurosEmailOtpAuthenticator implements Authenticator {
     static final String OTP_SENT_AT_NOTE = "ouros.email-otp.sent-at";
 
     private static final SecureRandom RANDOM = new SecureRandom();
+    private static final String LOGIN_TEMPLATE = "ouros-email-otp-login.ftl";
     private static final int DEFAULT_TTL_SECONDS = 300;
     private static final int DEFAULT_MAX_ATTEMPTS = 5;
     private static final int DEFAULT_RESEND_COOLDOWN_SECONDS = 30;
@@ -37,17 +38,15 @@ public final class OurosEmailOtpAuthenticator implements Authenticator {
         if (!hasUsableEmail(user)) {
             context.failureChallenge(
                 AuthenticationFlowError.INVALID_USER,
-                context.form().setError("ourosEmailOtpMissingEmail").createForm("ouros-email-otp-login.ftl")
+                context.form().setError("ourosEmailOtpMissingEmail").createForm(LOGIN_TEMPLATE)
             );
             return;
         }
 
         AuthenticationSessionModel authSession = context.getAuthenticationSession();
         long now = Instant.now().getEpochSecond();
-        if (!hasLiveChallenge(authSession, now)) {
-            if (!sendChallenge(context, now)) {
-                return;
-            }
+        if (!hasLiveChallenge(authSession, now) && !sendChallenge(context, now)) {
+            return;
         }
 
         context.challenge(renderForm(context, null));
@@ -138,7 +137,7 @@ public final class OurosEmailOtpAuthenticator implements Authenticator {
             clearChallenge(authSession);
             context.failureChallenge(
                 AuthenticationFlowError.INTERNAL_ERROR,
-                context.form().setError("ourosEmailOtpDeliveryError").createForm("ouros-email-otp-login.ftl")
+                context.form().setError("ourosEmailOtpDeliveryError").createForm(LOGIN_TEMPLATE)
             );
             return false;
         }
@@ -150,7 +149,7 @@ public final class OurosEmailOtpAuthenticator implements Authenticator {
         if (messageKey != null) {
             form.setError(messageKey);
         }
-        return form.createForm("ouros-email-otp-login.ftl");
+        return form.createForm(LOGIN_TEMPLATE);
     }
 
     static boolean hasUsableEmail(UserModel user) {
