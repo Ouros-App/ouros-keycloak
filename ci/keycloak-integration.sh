@@ -311,6 +311,7 @@ debug_grant_scopes="$(kcadm_get "clients/${debug_grant_uuid}/default-client-scop
 user_storage_scopes="$(kcadm_get "clients/${user_storage_service_uuid}/default-client-scopes" -r ouros)"
 
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${mobile_scopes}" >/dev/null
+jq -e '.[] | select(.name == "ci-token-exchange-audience")' <<< "${mobile_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ouros-identity")' <<< "${mobile_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${web_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ouros-identity")' <<< "${web_scopes}" >/dev/null
@@ -319,7 +320,7 @@ jq -e '.[] | select(.name == "ci-api-audience")' <<< "${token_exchange_scopes}" 
 jq -e '.[] | select(.name == "ouros-identity")' <<< "${token_exchange_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${api_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ci-auth-api-audience")' <<< "${auth_api_scopes}" >/dev/null
-jq -e '.[] | select(.name == "ci-api-audience")' <<< "${debug_grant_scopes}" >/dev/null
+jq -e '.[] | select(.name == "ci-token-exchange-audience")' <<< "${debug_grant_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ouros-identity")' <<< "${debug_grant_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ci-auth-api-audience")' <<< "${user_storage_scopes}" >/dev/null
 
@@ -490,9 +491,11 @@ jq -e '
   and (.account_type == "farm_owner")
   and (.realm_access.roles | index("farm_owner") != null)
   and (
-    if (.aud | type) == "array"
-    then (.aud | index("ci-api")) != null and (.aud | index("ci-token-exchange")) == null
-    else .aud == "ci-api"
+    if (.aud | type) == "array" then
+      (.aud | index("ci-api")) != null
+      and all(.aud[]; . == "ci-api" or . == "account")
+    else
+      .aud == "ci-api"
     end
   )
 ' <<< "${exchanged_payload}" >/dev/null
