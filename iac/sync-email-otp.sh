@@ -4,8 +4,9 @@ set -Eeuo pipefail
 KCADM="/opt/keycloak/bin/kcadm.sh"
 REALM="${KC_IAC_REALM:-ouros}"
 FLOW_ALIAS="ouros-browser-email-otp"
-FALLBACK_FLOW_ALIAS="${OUROS_EMAIL_OTP_FALLBACK_BROWSER_FLOW:-browser}"
+FALLBACK_FLOW_CONFIGURED="${OUROS_EMAIL_OTP_FALLBACK_BROWSER_FLOW:-}"
 ENABLED="${OUROS_EMAIL_OTP_ENABLED:-false}"
+HMAC_SECRET="${OUROS_EMAIL_OTP_HMAC_SECRET:-}"
 
 kcadm_run() {
   local output status
@@ -33,6 +34,7 @@ current_browser_flow_value() {
   output="$(kcadm_run get "realms/${REALM}" --fields browserFlow --format csv --noquotes)"
 
   while IFS= read -r line; do
+    line="${line%$'\r'}"
     [[ "${line}" == "browserFlow" || -z "${line}" ]] && continue
     printf '%s' "${line}"
     return 0
@@ -47,16 +49,18 @@ if [[ "${ENABLED}" != "true" && "${ENABLED}" != "false" ]]; then
   exit 1
 fi
 
+current_browser_flow="$(current_browser_flow_value)"
+fallback_flow="${FALLBACK_FLOW_CONFIGURED:-browser}"
+
 if [[ "${ENABLED}" != "true" ]]; then
-  current_browser_flow="$(current_browser_flow_value)"
   if [[ "${current_browser_flow}" == "${FLOW_ALIAS}" ]]; then
-    if ! flow_exists "${FALLBACK_FLOW_ALIAS}"; then
-      echo "[keycloak-iac] fallback browser flow ${FALLBACK_FLOW_ALIAS} does not exist" >&2
+    if ! flow_exists "${fallback_flow}"; then
+      echo "[keycloak-iac] fallback browser flow ${fallback_flow} does not exist" >&2
       exit 1
     fi
 
-    kcadm_run update "realms/${REALM}" -s "browserFlow=${FALLBACK_FLOW_ALIAS}" >/dev/null
-    echo "[keycloak-iac] email OTP disabled; restored browser flow ${FALLBACK_FLOW_ALIAS}"
+    kcadm_run update "realms/${REALM}" -s "browserFlow=${fallback_flow}" >/dev/null
+    echo "[keycloak-iac] email OTP disabled; restored browser flow ${fallback_flow}"
   else
     echo "[keycloak-iac] email OTP disabled; browser flow already uses ${current_browser_flow}"
   fi
@@ -65,6 +69,28 @@ fi
 
 if [[ -z "${OUROS_SMTP_HOST:-}" ]]; then
   echo "[keycloak-iac] OUROS_EMAIL_OTP_ENABLED=true requires OUROS_SMTP_HOST" >&2
+  exit 1
+fi
+
+if (( ${#HMAC_SECRET} < 32 )); then
+  echo "[keycloak-iac] OUROS_EMAIL_OTP_HMAC_SECRET must contain at least 32 characters" >&2
+  exit 1
+fi
+
+if [[ "${current_browser_flow}" != "${FLOW_ALIAS}" && "${current_browser_flow}" != "browser" ]]; then
+  if [[ -z "${FALLBACK_FLOW_CONFIGURED}" ]]; then
+    echo "[keycloak-iac] current browser flow is custom (${current_browser_flow}); set OUROS_EMAIL_OTP_FALLBACK_BROWSER_FLOW explicitly before enabling OTP" >&2
+    exit 1
+  fi
+
+  if [[ "${FALLBACK_FLOW_CONFIGURED}" != "${current_browser_flow}" ]]; then
+    echo "[keycloak-iac] OUROS_EMAIL_OTP_FALLBACK_BROWSER_FLOW must match the current custom browser flow (${current_browser_flow}) before enabling OTP" >&2
+    exit 1
+  fi
+fi
+
+if ! flow_exists "${fallback_flow}"; then
+  echo "[keycloak-iac] fallback browser flow ${fallback_flow} does not exist" >&2
   exit 1
 fi
 
@@ -136,4 +162,4 @@ ensure_execution "ouros-email-otp" "REQUIRED"
 
 kcadm_run update "realms/${REALM}" -s "browserFlow=${FLOW_ALIAS}" >/dev/null
 
-echo "[keycloak-iac] bound realm ${REALM} browser flow to ${FLOW_ALIAS}"
+echo "[keycloak-iac] bound realm ${REALM} browser flow to ${FLOW_ALIAS}; rollback flow is ${fallback_flow}"
