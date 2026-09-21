@@ -153,14 +153,16 @@ SCOPE_NAME="ms-example-api-audience"
 MAPPER_NAME="ms-example-api-audience"
 ```
 
-Exemplo mobile:
+Client mobile de produção:
 
 ```bash
 CLIENT_TYPE="mobile"
 CLIENT_ID="ouros-mobile"
-REDIRECT_URIS="com.ouros.app:/oauth2redirect"
-AUDIENCES="ms-example-api|ms-another-api"
+REDIRECT_URIS="com.ourosapp.ourosandroidapp:/oauth2redirect|http://127.0.0.1:8765/callback"
+AUDIENCES="ms-spring-api|ms-ai-server|ms-telemetry-dashboard-service"
 ```
+
+O app autentica uma única vez via Authorization Code + PKCE S256. O access token resultante contém as três audiences e pode ser enviado como Bearer para as três APIs. O refresh token é enviado somente ao endpoint de token do Keycloak. O redirect loopback em `127.0.0.1:8765` existe apenas para o script operacional de teste E2E; o Android usa o custom scheme.
 
 Exemplo web:
 
