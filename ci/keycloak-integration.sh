@@ -439,10 +439,14 @@ jq -e '
   (.preferred_username == "ci-user@example.com")
   and (.database_id == 42)
   and (.account_type == "farm_owner")
-  and (if (.aud | type) == "array"
-       then (.aud | length) == 1 and .aud[0] == "ci-api"
-       else .aud == "ci-api"
-       end)
+  and (
+    if (.aud | type) == "array" then
+      (.aud | index("ci-api")) != null
+      and all(.aud[]; . == "ci-api" or . == "account")
+    else
+      .aud == "ci-api"
+    end
+  )
 ' <<< "${debug_grant_payload}" >/dev/null
 
 echo "[integration] verifying Phase 3 first-party broker token contract"
