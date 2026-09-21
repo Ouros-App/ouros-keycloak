@@ -180,7 +180,7 @@ CLIENT_ID="ouros-worker"
 AUDIENCES="ms-example-api|ms-another-api"
 ```
 
-Clients `service` são confidenciais. Clients `password-grant` também são confidenciais, mas existem somente para exceções internas explicitamente declaradas. O caso atual é `ms-ai-server-debug`, destinado ao Debug Console do AI Server e com audience limitada a `ms-ai-server`. O Keycloak gera e mantém o client secret; ele não é versionado no repositório. `AUDIENCES` de `mobile`, `web` e `service` só pode apontar para audiences declaradas por clients `microservice`. Valores múltiplos usam `|` como separador.
+Clients `service` são confidenciais. Clients `password-grant` também são confidenciais, mas existem somente para exceções internas explicitamente declaradas. O caso atual é `ms-ai-server-debug`, destinado ao Debug Console do AI Server e limitado aos audiences `ms-ai-server` e `ms-mcp-server-ouros-knowledge`, pois o AI Server encaminha o mesmo JWT autenticado ao MCP padrão. O Keycloak gera e mantém o client secret; ele não é versionado no repositório. `AUDIENCES` de `mobile`, `web` e `service` só pode apontar para audiences declaradas por clients `microservice`. Valores múltiplos usam `|` como separador.
 
 Todo client `mobile` ou `web` gerenciado recebe também o default client scope `ouros-identity`. Em tokens de usuário ele mapeia `database_id`, `account_type`, `farm_id`, `enterprise_id` e `first_access`. Campos opcionais ausentes não são inventados. A autorização principal continua em `realm_access.roles`, enquanto `sub` identifica o sujeito federado do Keycloak.
 
