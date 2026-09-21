@@ -329,7 +329,12 @@ OUROS_SMTP_AUTH=false
 OUROS_SMTP_STARTTLS=false
 OUROS_SMTP_SSL=false
 OUROS_EMAIL_OTP_ENABLED=true
+OUROS_EMAIL_OTP_HMAC_SECRET=<segredo-aleatorio-de-pelo-menos-32-bytes>
 ```
+
+O segredo HMAC deve ficar no secret manager e nunca no Git. O digest do OTP é protegido com HMAC-SHA-256 e o desafio é armazenado no armazenamento single-use do Keycloak, que garante consumo único mesmo em concorrência entre nós.
+
+Se o realm já usa um browser flow customizado, configure `OUROS_EMAIL_OTP_FALLBACK_BROWSER_FLOW` com o alias exato desse flow antes de habilitar o OTP. Assim, desabilitar `OUROS_EMAIL_OTP_ENABLED` restaura o flow correto em vez de assumir `browser`.
 
 Se Keycloak e Mailpit estiverem na mesma rede Docker, use `OUROS_SMTP_HOST=mailpit`. Não habilite o OTP sem SMTP: o reconciliador falha de forma explícita para evitar um fluxo de login impossível de concluir.
 
