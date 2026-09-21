@@ -159,10 +159,10 @@ Client mobile de produção:
 CLIENT_TYPE="mobile"
 CLIENT_ID="ouros-mobile"
 REDIRECT_URIS="com.ourosapp.ourosandroidapp:/oauth2redirect|http://127.0.0.1:8765/callback"
-AUDIENCES="ms-spring-api|ms-ai-server|ms-telemetry-dashboard-service"
+AUDIENCES="ms-spring-api|ms-ai-server|ms-telemetry-dashboard-service|ms-mcp-server-ouros-knowledge"
 ```
 
-O app autentica uma única vez via Authorization Code + PKCE S256. O access token resultante contém as três audiences e pode ser enviado como Bearer para as três APIs. O refresh token é enviado somente ao endpoint de token do Keycloak. O redirect loopback em `127.0.0.1:8765` existe apenas para o script operacional de teste E2E; o Android usa o custom scheme.
+O app autentica uma única vez via Authorization Code + PKCE S256. O access token pode ser enviado como Bearer para as três APIs mobile-facing. Ele também inclui a audience interna `ms-mcp-server-ouros-knowledge`, porque o AI Server encaminha o mesmo JWT ao Knowledge MCP durante chamadas do Midas. O refresh token é enviado somente ao endpoint de token do Keycloak. O redirect loopback em `127.0.0.1:8765` existe apenas para o script operacional de teste E2E; o Android usa o custom scheme.
 
 Exemplo web:
 
@@ -353,7 +353,7 @@ python3 scripts/test-mobile-auth.py
 
 O comando acima é executado a partir de um checkout do `Ouros-App/ouros-docs`.
 
-O script usa o redirect loopback exato `http://127.0.0.1:8765/callback`, abre o Browser Flow real, espera senha + OTP no navegador, troca o authorization code com PKCE S256 e valida que o access token contém as audiences `ms-spring-api`, `ms-ai-server` e `ms-telemetry-dashboard-service`. Em seguida, usa o refresh token e valida o novo access token.
+O script usa o redirect loopback exato `http://127.0.0.1:8765/callback`, abre o Browser Flow real, espera senha + OTP no navegador, troca o authorization code com PKCE S256 e valida que o access token contém as audiences mobile-facing `ms-spring-api`, `ms-ai-server`, `ms-telemetry-dashboard-service` e a audience delegada `ms-mcp-server-ouros-knowledge`. Em seguida, usa o refresh token e valida o novo access token.
 
 Tokens não são impressos por padrão. Para um teste manual explícito de APIs:
 
