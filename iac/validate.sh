@@ -235,8 +235,28 @@ validate_first_party_broker_contract() {
     || fail "${broker_file}: AUDIENCES must contain the complete Phase 3 first-party resource-server set"
 }
 
+
+validate_debug_console_contract() {
+  local debug_file="iac/resources/ms-ai-server-debug.conf"
+  local actual expected actual_sorted expected_sorted
+  expected="ms-ai-server|ms-mcp-server-ouros-knowledge"
+
+  [[ -f "${debug_file}" ]] || fail "${debug_file}: official debug client declaration is required"
+  [[ "$(config_get "${debug_file}" CLIENT_TYPE)" == "password-grant" ]] \
+    || fail "${debug_file}: CLIENT_TYPE must remain password-grant"
+  [[ "$(config_get "${debug_file}" CLIENT_ID)" == "ms-ai-server-debug" ]] \
+    || fail "${debug_file}: CLIENT_ID must remain ms-ai-server-debug"
+
+  actual="$(config_get "${debug_file}" AUDIENCES)"
+  actual_sorted="$(tr '|' '\n' <<< "${actual}" | sed '/^$/d' | sort -u | paste -sd'|' -)"
+  expected_sorted="$(tr '|' '\n' <<< "${expected}" | sort -u | paste -sd'|' -)"
+  [[ "${actual_sorted}" == "${expected_sorted}" ]] \
+    || fail "${debug_file}: AUDIENCES must allow the AI Server and its standard MCP resource"
+}
+
 validate_group iac/resources '*.conf' production false
 validate_first_party_broker_contract
+validate_debug_console_contract
 validate_group iac/examples '*.conf.example' examples true
 validate_group iac/test-fixtures '*.conf' test-fixtures true
 

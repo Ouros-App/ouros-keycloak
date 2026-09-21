@@ -442,9 +442,10 @@ jq -e '
   and (
     if (.aud | type) == "array" then
       (.aud | index("ci-api")) != null
-      and all(.aud[]; . == "ci-api" or . == "account")
+      and (.aud | index("ci-auth-api")) != null
+      and all(.aud[]; . == "ci-api" or . == "ci-auth-api" or . == "account")
     else
-      .aud == "ci-api"
+      false
     end
   )
 ' <<< "${debug_grant_payload}" >/dev/null
