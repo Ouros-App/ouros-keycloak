@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -18,6 +19,7 @@ import static org.mockito.Mockito.when;
 
 import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.Response;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
@@ -30,15 +32,20 @@ import org.keycloak.forms.login.LoginFormsProvider;
 import org.keycloak.http.HttpRequest;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
+import org.keycloak.models.SingleUseObjectProvider;
 import org.keycloak.models.UserModel;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.sessions.RootAuthenticationSessionModel;
 
 class OurosEmailOtpAuthenticatorTest {
-    private final OurosEmailOtpAuthenticator authenticator = new OurosEmailOtpAuthenticator();
+    private static final byte[] TEST_SECRET =
+        "test-email-otp-hmac-secret-0123456789abcdef".getBytes(StandardCharsets.UTF_8);
+
+    private final OurosEmailOtpAuthenticator authenticator =
+        new OurosEmailOtpAuthenticator(() -> TEST_SECRET);
 
     @Test
-    void authenticateSendsChallengeAndStoresOnlyDigest() throws Exception {
+    void authenticateSendsChallengeWithoutPersistingOtpDigestInAuthSession() throws Exception {
         Fixture fixture = new Fixture();
 
         authenticator.authenticate(fixture.context);
@@ -50,25 +57,24 @@ class OurosEmailOtpAuthenticatorTest {
         );
         verify(fixture.context).challenge(fixture.response);
 
-        String storedHash = fixture.notes.get(OurosEmailOtpAuthenticator.OTP_HASH_NOTE);
-        assertNotNull(storedHash);
-        assertEquals(64, storedHash.length());
-        assertFalse(storedHash.matches("\\d{6}"));
-        assertEquals("0", fixture.notes.get(OurosEmailOtpAuthenticator.OTP_ATTEMPTS_NOTE));
-        assertTrue(
-            Long.parseLong(fixture.notes.get(OurosEmailOtpAuthenticator.OTP_EXPIRES_NOTE))
-                > Instant.now().getEpochSecond()
-        );
+        String challengeId = fixture.notes.get(OurosEmailOtpAuthenticator.OTP_CHALLENGE_ID_NOTE);
+        assertNotNull(challengeId);
+        assertFalse(fixture.notes.containsKey("ouros.email-otp.hash"));
+
+        Map<String, String> storedState =
+            fixture.singleUseState.get(fixture.challengeStoreKey(challengeId));
+        assertNotNull(storedState);
+        String storedDigest = storedState.get(OurosEmailOtpAuthenticator.CHALLENGE_DIGEST);
+        assertNotNull(storedDigest);
+        assertEquals(64, storedDigest.length());
+        assertFalse(storedDigest.matches("\\d{6}"));
+        assertEquals("0", storedState.get(OurosEmailOtpAuthenticator.CHALLENGE_ATTEMPTS));
     }
 
     @Test
     void authenticateReusesLiveChallengeWithoutSendingAgain() throws Exception {
         Fixture fixture = new Fixture();
-        fixture.notes.put(OurosEmailOtpAuthenticator.OTP_HASH_NOTE, "existing-hash");
-        fixture.notes.put(
-            OurosEmailOtpAuthenticator.OTP_EXPIRES_NOTE,
-            Long.toString(Instant.now().getEpochSecond() + 120)
-        );
+        fixture.liveChallenge("123456");
 
         authenticator.authenticate(fixture.context);
 
@@ -91,19 +97,61 @@ class OurosEmailOtpAuthenticatorTest {
     }
 
     @Test
-    void actionAcceptsMatchingCodeAndClearsChallenge() {
+    void actionAcceptsMatchingCodeAndConsumesChallenge() {
         Fixture fixture = new Fixture();
-        String code = "123456";
-        fixture.liveChallenge(code);
-        fixture.form.putSingle("otp", code);
+        fixture.liveChallenge("123456");
+        fixture.form.putSingle("otp", "123456");
 
         authenticator.action(fixture.context);
 
         verify(fixture.context).success();
-        assertFalse(fixture.notes.containsKey(OurosEmailOtpAuthenticator.OTP_HASH_NOTE));
-        assertFalse(fixture.notes.containsKey(OurosEmailOtpAuthenticator.OTP_EXPIRES_NOTE));
-        assertFalse(fixture.notes.containsKey(OurosEmailOtpAuthenticator.OTP_ATTEMPTS_NOTE));
-        assertFalse(fixture.notes.containsKey(OurosEmailOtpAuthenticator.OTP_SENT_AT_NOTE));
+        assertFalse(fixture.notes.containsKey(OurosEmailOtpAuthenticator.OTP_CHALLENGE_ID_NOTE));
+        assertTrue(
+            fixture.singleUseState.values().stream()
+                .anyMatch(state -> OurosEmailOtpAuthenticator.TERMINAL_CONSUMED.equals(
+                    state.get(OurosEmailOtpAuthenticator.TERMINAL_STATUS)
+                ))
+        );
+    }
+
+    @Test
+    void atomicConsumeAllowsOnlyOneSuccessForSameChallenge() {
+        Fixture fixture = new Fixture();
+        fixture.liveChallenge("123456");
+        String challengeId =
+            fixture.notes.get(OurosEmailOtpAuthenticator.OTP_CHALLENGE_ID_NOTE);
+        long expiresAt =
+            Long.parseLong(fixture.notes.get(OurosEmailOtpAuthenticator.OTP_EXPIRES_NOTE));
+
+        AuthenticationSessionModel competingSession = mock(AuthenticationSessionModel.class);
+        when(competingSession.getParentSession()).thenReturn(fixture.rootSession);
+        when(competingSession.getTabId()).thenReturn("tab-id");
+        when(competingSession.getAuthNote(OurosEmailOtpAuthenticator.OTP_CHALLENGE_ID_NOTE))
+            .thenReturn(challengeId);
+        when(competingSession.getAuthNote(OurosEmailOtpAuthenticator.OTP_EXPIRES_NOTE))
+            .thenReturn(Long.toString(expiresAt));
+
+        OurosEmailOtpAuthenticator.ConsumeResult first =
+            OurosEmailOtpAuthenticator.consumeChallenge(
+                fixture.keycloakSession,
+                fixture.authSession,
+                "123456",
+                Instant.now().getEpochSecond(),
+                5,
+                TEST_SECRET
+            );
+        OurosEmailOtpAuthenticator.ConsumeResult second =
+            OurosEmailOtpAuthenticator.consumeChallenge(
+                fixture.keycloakSession,
+                competingSession,
+                "123456",
+                Instant.now().getEpochSecond(),
+                5,
+                TEST_SECRET
+            );
+
+        assertEquals(OurosEmailOtpAuthenticator.ConsumeResult.SUCCESS, first);
+        assertEquals(OurosEmailOtpAuthenticator.ConsumeResult.ALREADY_CONSUMED, second);
     }
 
     @Test
@@ -116,14 +164,17 @@ class OurosEmailOtpAuthenticatorTest {
 
         verify(fixture.forms).setError("ourosEmailOtpInvalid");
         verify(fixture.context).challenge(fixture.response);
-        assertEquals("0", fixture.notes.get(OurosEmailOtpAuthenticator.OTP_ATTEMPTS_NOTE));
+        assertEquals(
+            "0",
+            fixture.challengeState().get(OurosEmailOtpAuthenticator.CHALLENGE_ATTEMPTS)
+        );
     }
 
     @Test
     void actionFailsClosedAfterMaximumInvalidAttempts() {
         Fixture fixture = new Fixture();
         fixture.liveChallenge("123456");
-        fixture.notes.put(OurosEmailOtpAuthenticator.OTP_ATTEMPTS_NOTE, "4");
+        fixture.challengeState().put(OurosEmailOtpAuthenticator.CHALLENGE_ATTEMPTS, "4");
         fixture.form.putSingle("otp", "654321");
 
         authenticator.action(fixture.context);
@@ -133,7 +184,48 @@ class OurosEmailOtpAuthenticatorTest {
             AuthenticationFlowError.INVALID_CREDENTIALS,
             fixture.response
         );
-        assertFalse(fixture.notes.containsKey(OurosEmailOtpAuthenticator.OTP_HASH_NOTE));
+        assertFalse(fixture.notes.containsKey(OurosEmailOtpAuthenticator.OTP_CHALLENGE_ID_NOTE));
+    }
+
+    @Test
+    void invalidAttemptIsReinsertedWithIncrementedCounter() {
+        Fixture fixture = new Fixture();
+        fixture.liveChallenge("123456");
+
+        OurosEmailOtpAuthenticator.ConsumeResult result =
+            OurosEmailOtpAuthenticator.consumeChallenge(
+                fixture.keycloakSession,
+                fixture.authSession,
+                "654321",
+                Instant.now().getEpochSecond(),
+                5,
+                TEST_SECRET
+            );
+
+        assertEquals(OurosEmailOtpAuthenticator.ConsumeResult.INVALID, result);
+        assertEquals(
+            "1",
+            fixture.challengeState().get(OurosEmailOtpAuthenticator.CHALLENGE_ATTEMPTS)
+        );
+    }
+
+    @Test
+    void missingChallengeDuringLiveWindowIsReportedAsBusy() {
+        Fixture fixture = new Fixture();
+        fixture.liveChallenge("123456");
+        fixture.singleUseState.clear();
+
+        OurosEmailOtpAuthenticator.ConsumeResult result =
+            OurosEmailOtpAuthenticator.consumeChallenge(
+                fixture.keycloakSession,
+                fixture.authSession,
+                "123456",
+                Instant.now().getEpochSecond(),
+                5,
+                TEST_SECRET
+            );
+
+        assertEquals(OurosEmailOtpAuthenticator.ConsumeResult.BUSY, result);
     }
 
     @Test
@@ -151,7 +243,6 @@ class OurosEmailOtpAuthenticatorTest {
         verify(fixture.forms).setError("ourosEmailOtpResendTooSoon");
         verify(fixture.context).challenge(fixture.response);
     }
-
 
     @Test
     void actionResendsAfterCooldown() throws Exception {
@@ -172,17 +263,18 @@ class OurosEmailOtpAuthenticatorTest {
         );
         verify(fixture.forms).setError("ourosEmailOtpResent");
         verify(fixture.context).challenge(fixture.response);
-        assertEquals("0", fixture.notes.get(OurosEmailOtpAuthenticator.OTP_ATTEMPTS_NOTE));
     }
 
     @Test
     void actionReissuesExpiredChallenge() throws Exception {
         Fixture fixture = new Fixture();
-        fixture.notes.put(OurosEmailOtpAuthenticator.OTP_HASH_NOTE, "expired-hash");
+        fixture.liveChallenge("123456");
         fixture.notes.put(
             OurosEmailOtpAuthenticator.OTP_EXPIRES_NOTE,
             Long.toString(Instant.now().getEpochSecond() - 1)
         );
+        fixture.singleUseState.clear();
+        fixture.form.putSingle("otp", "123456");
 
         authenticator.action(fixture.context);
 
@@ -192,20 +284,6 @@ class OurosEmailOtpAuthenticatorTest {
             anyMap()
         );
         verify(fixture.forms).setError("ourosEmailOtpExpired");
-        verify(fixture.context).challenge(fixture.response);
-        assertNotEquals("expired-hash", fixture.notes.get(OurosEmailOtpAuthenticator.OTP_HASH_NOTE));
-    }
-
-    @Test
-    void actionCountsInvalidCodeBeforeAttemptLimit() {
-        Fixture fixture = new Fixture();
-        fixture.liveChallenge("123456");
-        fixture.form.putSingle("otp", "654321");
-
-        authenticator.action(fixture.context);
-
-        assertEquals("1", fixture.notes.get(OurosEmailOtpAuthenticator.OTP_ATTEMPTS_NOTE));
-        verify(fixture.forms).setError("ourosEmailOtpInvalid");
         verify(fixture.context).challenge(fixture.response);
     }
 
@@ -223,8 +301,32 @@ class OurosEmailOtpAuthenticatorTest {
             AuthenticationFlowError.INTERNAL_ERROR,
             fixture.response
         );
-        assertFalse(fixture.notes.containsKey(OurosEmailOtpAuthenticator.OTP_HASH_NOTE));
+        assertFalse(fixture.notes.containsKey(OurosEmailOtpAuthenticator.OTP_CHALLENGE_ID_NOTE));
+        assertTrue(fixture.singleUseState.isEmpty());
         verify(fixture.context, never()).challenge(fixture.response);
+    }
+
+    @Test
+    void hmacDigestIsBoundToChallengeAndRequiresStrongSecret() {
+        Fixture fixture = new Fixture();
+
+        String first = OurosEmailOtpAuthenticator.hmacDigest(
+            fixture.authSession,
+            "challenge-a",
+            "123456",
+            TEST_SECRET
+        );
+        String second = OurosEmailOtpAuthenticator.hmacDigest(
+            fixture.authSession,
+            "challenge-b",
+            "123456",
+            TEST_SECRET
+        );
+
+        assertEquals(64, first.length());
+        assertNotEquals(first, second);
+        assertTrue(OurosEmailOtpAuthenticator.constantTimeEquals(first, first));
+        assertFalse(OurosEmailOtpAuthenticator.constantTimeEquals(first, second));
     }
 
     @Test
@@ -252,14 +354,13 @@ class OurosEmailOtpAuthenticatorTest {
         assertFalse(OurosEmailOtpAuthenticator.hasUsableEmail(null));
 
         assertTrue(authenticator.requiresUser());
-        assertTrue(authenticator.configuredFor(mock(KeycloakSession.class), mock(RealmModel.class), userWithEmail()));
-
-        Fixture fixture = new Fixture();
-        assertFalse(OurosEmailOtpAuthenticator.matches(fixture.authSession, "000000"));
-        fixture.notes.put(OurosEmailOtpAuthenticator.OTP_HASH_NOTE, " ");
-        fixture.notes.put(OurosEmailOtpAuthenticator.OTP_EXPIRES_NOTE, Long.toString(Instant.now().getEpochSecond() + 60));
-        assertFalse(OurosEmailOtpAuthenticator.hasLiveChallenge(fixture.authSession, Instant.now().getEpochSecond()));
-        assertNotEquals("", OurosEmailOtpAuthenticator.hash(fixture.authSession, "000000"));
+        assertTrue(
+            authenticator.configuredFor(
+                mock(KeycloakSession.class),
+                mock(RealmModel.class),
+                userWithEmail()
+            )
+        );
     }
 
     private static UserModel userWithEmail() {
@@ -275,21 +376,25 @@ class OurosEmailOtpAuthenticatorTest {
         final UserModel user = mock(UserModel.class);
         final KeycloakSession keycloakSession = mock(KeycloakSession.class);
         final RealmModel realm = mock(RealmModel.class);
+        final SingleUseObjectProvider singleUse = mock(SingleUseObjectProvider.class);
         final EmailTemplateProvider email = mock(EmailTemplateProvider.class);
         final LoginFormsProvider forms = mock(LoginFormsProvider.class);
         final HttpRequest httpRequest = mock(HttpRequest.class);
         final Response response = mock(Response.class);
         final MultivaluedHashMap<String, String> form = new MultivaluedHashMap<>();
         final Map<String, String> notes = new HashMap<>();
+        final Map<String, Map<String, String>> singleUseState = new HashMap<>();
 
         Fixture() {
             when(context.getUser()).thenReturn(user);
             when(user.getEmail()).thenReturn("user@example.com");
             when(context.getAuthenticationSession()).thenReturn(authSession);
             when(authSession.getParentSession()).thenReturn(rootSession);
+            when(authSession.getTabId()).thenReturn("tab-id");
             when(rootSession.getId()).thenReturn("root-session");
             when(context.getSession()).thenReturn(keycloakSession);
             when(context.getRealm()).thenReturn(realm);
+            when(keycloakSession.singleUseObjects()).thenReturn(singleUse);
             when(keycloakSession.getProvider(EmailTemplateProvider.class)).thenReturn(email);
             when(email.setRealm(realm)).thenReturn(email);
             when(email.setUser(user)).thenReturn(email);
@@ -313,22 +418,57 @@ class OurosEmailOtpAuthenticatorTest {
                 notes.remove(invocation.getArgument(0));
                 return null;
             }).when(authSession).removeAuthNote(anyString());
+
+            when(singleUse.get(anyString()))
+                .thenAnswer(invocation -> {
+                    Map<String, String> state = singleUseState.get(invocation.getArgument(0));
+                    return state == null ? null : new HashMap<>(state);
+                });
+            when(singleUse.remove(anyString()))
+                .thenAnswer(invocation -> singleUseState.remove(invocation.getArgument(0)));
+            doAnswer(invocation -> {
+                singleUseState.put(
+                    invocation.getArgument(0),
+                    new HashMap<>((Map<String, String>) invocation.getArgument(2))
+                );
+                return null;
+            }).when(singleUse).put(anyString(), anyLong(), anyMap());
         }
 
         void liveChallenge(String code) {
-            notes.put(
-                OurosEmailOtpAuthenticator.OTP_HASH_NOTE,
-                OurosEmailOtpAuthenticator.hash(authSession, code)
-            );
+            String challengeId = "test-challenge";
+            long expiresAt = Instant.now().getEpochSecond() + 120;
+            notes.put(OurosEmailOtpAuthenticator.OTP_CHALLENGE_ID_NOTE, challengeId);
             notes.put(
                 OurosEmailOtpAuthenticator.OTP_EXPIRES_NOTE,
-                Long.toString(Instant.now().getEpochSecond() + 120)
+                Long.toString(expiresAt)
             );
-            notes.put(OurosEmailOtpAuthenticator.OTP_ATTEMPTS_NOTE, "0");
             notes.put(
                 OurosEmailOtpAuthenticator.OTP_SENT_AT_NOTE,
                 Long.toString(Instant.now().getEpochSecond() - 60)
             );
+
+            Map<String, String> state = new HashMap<>();
+            state.put(
+                OurosEmailOtpAuthenticator.CHALLENGE_DIGEST,
+                OurosEmailOtpAuthenticator.hmacDigest(
+                    authSession,
+                    challengeId,
+                    code,
+                    TEST_SECRET
+                )
+            );
+            state.put(OurosEmailOtpAuthenticator.CHALLENGE_ATTEMPTS, "0");
+            singleUseState.put(challengeStoreKey(challengeId), state);
+        }
+
+        Map<String, String> challengeState() {
+            String challengeId = notes.get(OurosEmailOtpAuthenticator.OTP_CHALLENGE_ID_NOTE);
+            return singleUseState.get(challengeStoreKey(challengeId));
+        }
+
+        String challengeStoreKey(String challengeId) {
+            return "ouros-email-otp:" + challengeId;
         }
     }
 }
