@@ -132,15 +132,18 @@ jobs:
           test -f providers/ouros-user-storage/src/main/resources/theme-resources/templates/text/ouros-email-otp.ftl
           test -f iac/resources/ms-auth-service-internal.conf
           test -f iac/resources/keycloak-user-storage.conf
+          test -f iac/resources/ms-ai-server-mcp-exchange.conf
           test -f iac/user-storage/ouros-auth-service.conf
           test -f iac/examples/microservice.conf.example
           test -f iac/examples/mobile.conf.example
           test -f iac/examples/web.conf.example
           test -f iac/examples/service.conf.example
+          test -f iac/examples/token-exchange.conf.example
           test -f iac/test-fixtures/ci-api.conf
           test -f iac/test-fixtures/ci-mobile.conf
           test -f iac/test-fixtures/ci-web.conf
           test -f iac/test-fixtures/ci-service.conf
+          test -f iac/test-fixtures/ci-token-exchange.conf
           test -f iac/test-fixtures/ci-auth-api.conf
           test -f iac/test-fixtures/ci-user-storage.conf
           test -f iac/test-fixtures/user-storage/ouros-auth-service.conf
