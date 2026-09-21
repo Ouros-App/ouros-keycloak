@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -23,6 +24,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
+import org.keycloak.email.EmailException;
 import org.keycloak.email.EmailTemplateProvider;
 import org.keycloak.forms.login.LoginFormsProvider;
 import org.keycloak.http.HttpRequest;
@@ -150,13 +152,90 @@ class OurosEmailOtpAuthenticatorTest {
         verify(fixture.context).challenge(fixture.response);
     }
 
+
+    @Test
+    void actionResendsAfterCooldown() throws Exception {
+        Fixture fixture = new Fixture();
+        fixture.liveChallenge("123456");
+        fixture.notes.put(
+            OurosEmailOtpAuthenticator.OTP_SENT_AT_NOTE,
+            Long.toString(Instant.now().getEpochSecond() - 120)
+        );
+        fixture.form.putSingle("resend", "true");
+
+        authenticator.action(fixture.context);
+
+        verify(fixture.email).send(
+            eq("ourosEmailOtpSubject"),
+            eq("ouros-email-otp.ftl"),
+            anyMap()
+        );
+        verify(fixture.forms).setError("ourosEmailOtpResent");
+        verify(fixture.context).challenge(fixture.response);
+        assertEquals("0", fixture.notes.get(OurosEmailOtpAuthenticator.OTP_ATTEMPTS_NOTE));
+    }
+
+    @Test
+    void actionReissuesExpiredChallenge() throws Exception {
+        Fixture fixture = new Fixture();
+        fixture.notes.put(OurosEmailOtpAuthenticator.OTP_HASH_NOTE, "expired-hash");
+        fixture.notes.put(
+            OurosEmailOtpAuthenticator.OTP_EXPIRES_NOTE,
+            Long.toString(Instant.now().getEpochSecond() - 1)
+        );
+
+        authenticator.action(fixture.context);
+
+        verify(fixture.email).send(
+            eq("ourosEmailOtpSubject"),
+            eq("ouros-email-otp.ftl"),
+            anyMap()
+        );
+        verify(fixture.forms).setError("ourosEmailOtpExpired");
+        verify(fixture.context).challenge(fixture.response);
+        assertNotEquals("expired-hash", fixture.notes.get(OurosEmailOtpAuthenticator.OTP_HASH_NOTE));
+    }
+
+    @Test
+    void actionCountsInvalidCodeBeforeAttemptLimit() {
+        Fixture fixture = new Fixture();
+        fixture.liveChallenge("123456");
+        fixture.form.putSingle("otp", "654321");
+
+        authenticator.action(fixture.context);
+
+        assertEquals("1", fixture.notes.get(OurosEmailOtpAuthenticator.OTP_ATTEMPTS_NOTE));
+        verify(fixture.forms).setError("ourosEmailOtpInvalid");
+        verify(fixture.context).challenge(fixture.response);
+    }
+
+    @Test
+    void authenticateFailsClosedWhenEmailDeliveryFails() throws Exception {
+        Fixture fixture = new Fixture();
+        doThrow(new EmailException("smtp unavailable"))
+            .when(fixture.email)
+            .send(anyString(), anyString(), anyMap());
+
+        authenticator.authenticate(fixture.context);
+
+        verify(fixture.forms).setError("ourosEmailOtpDeliveryError");
+        verify(fixture.context).failureChallenge(
+            AuthenticationFlowError.INTERNAL_ERROR,
+            fixture.response
+        );
+        assertFalse(fixture.notes.containsKey(OurosEmailOtpAuthenticator.OTP_HASH_NOTE));
+        verify(fixture.context, never()).challenge(fixture.response);
+    }
+
     @Test
     void helperMethodsHandleExpectedEdgeCases() {
         assertEquals("***", OurosEmailOtpAuthenticator.maskEmail(null));
         assertEquals("***", OurosEmailOtpAuthenticator.maskEmail("invalid"));
+        assertEquals("****@example.com", OurosEmailOtpAuthenticator.maskEmail("@example.com"));
         assertEquals("u***@example.com", OurosEmailOtpAuthenticator.maskEmail("user@example.com"));
 
         assertEquals(7L, OurosEmailOtpAuthenticator.parseLong(null, 7L));
+        assertEquals(7L, OurosEmailOtpAuthenticator.parseLong("   ", 7L));
         assertEquals(7L, OurosEmailOtpAuthenticator.parseLong("not-a-number", 7L));
         assertEquals(42L, OurosEmailOtpAuthenticator.parseLong("42", 7L));
 
@@ -174,7 +253,13 @@ class OurosEmailOtpAuthenticatorTest {
 
         assertTrue(authenticator.requiresUser());
         assertTrue(authenticator.configuredFor(mock(KeycloakSession.class), mock(RealmModel.class), userWithEmail()));
-        assertNotEquals("", OurosEmailOtpAuthenticator.hash(new Fixture().authSession, "000000"));
+
+        Fixture fixture = new Fixture();
+        assertFalse(OurosEmailOtpAuthenticator.matches(fixture.authSession, "000000"));
+        fixture.notes.put(OurosEmailOtpAuthenticator.OTP_HASH_NOTE, " ");
+        fixture.notes.put(OurosEmailOtpAuthenticator.OTP_EXPIRES_NOTE, Long.toString(Instant.now().getEpochSecond() + 60));
+        assertFalse(OurosEmailOtpAuthenticator.hasLiveChallenge(fixture.authSession, Instant.now().getEpochSecond()));
+        assertNotEquals("", OurosEmailOtpAuthenticator.hash(fixture.authSession, "000000"));
     }
 
     private static UserModel userWithEmail() {
