@@ -343,6 +343,24 @@ Se Keycloak e Mailpit estiverem na mesma rede Docker, use `OUROS_SMTP_HOST=mailp
 
 O OTP expira por padrão em 5 minutos, aceita no máximo 5 tentativas e limita reenvios a um por 30 segundos. Esses valores podem ser ajustados com `OUROS_EMAIL_OTP_TTL_SECONDS`, `OUROS_EMAIL_OTP_MAX_ATTEMPTS` e `OUROS_EMAIL_OTP_RESEND_COOLDOWN_SECONDS`.
 
+### Smoke test E2E do mobile
+
+Depois de reconciliar o client `ouros-mobile` e habilitar SMTP + OTP em produção, rode:
+
+```bash
+python3 scripts/test-mobile-auth.py
+```
+
+O script usa o redirect loopback exato `http://127.0.0.1:8765/callback`, abre o Browser Flow real, espera senha + OTP no navegador, troca o authorization code com PKCE S256 e valida que o access token contém as audiences `ms-spring-api`, `ms-ai-server` e `ms-telemetry-dashboard-service`. Em seguida, usa o refresh token e valida o novo access token.
+
+Tokens não são impressos por padrão. Para um teste manual explícito de APIs:
+
+```bash
+python3 scripts/test-mobile-auth.py --output ./mobile-auth-tokens.json
+```
+
+O arquivo é criado com permissão `0600` quando suportado e deve ser apagado após o teste.
+
 ## Segurança
 
 - credenciais e client secrets nunca devem ser commitados;
