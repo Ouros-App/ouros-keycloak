@@ -23,7 +23,7 @@ O repositório atualmente mantém:
 - PostgreSQL dedicado ao Keycloak na VLAN privada da Discloud;
 - endpoint público OIDC/JWKS em `https://ouros-keycloak.discloud.app`;
 - realm, roles, clients, scopes e User Storage reconciliados como Infrastructure as Code no startup;
-- quatro perfis de client: `microservice`, `mobile`, `web` e `service`;
+- perfis declarativos de client para `microservice`, `mobile`, `web`, `service` e grants restritos de debug;
 - User Storage SPI read-only para autenticar identidades existentes do Ouros através do `ms-auth-service`;
 - escopo gerenciado `ouros-identity` para transportar claims de negócio em access tokens de usuários;
 - configuração do `ms-telemetry-dashboard-service` versionada no IaC.
@@ -141,6 +141,7 @@ Cada client gerenciado é um arquivo `.conf` em `iac/resources/`. Alterar a conf
 | `mobile` | aplicativo nativo | Authorization Code + PKCE S256 |
 | `web` | frontend web/SPA | Authorization Code + PKCE S256 + web origins explícitas |
 | `service` | worker, cron, integração ou automação M2M | client confidencial + service account + Client Credentials |
+| `password-grant` | ferramenta interna/debug explicitamente isolada | client confidencial + Direct Access Grant, sem Browser Flow |
 
 Exemplo de microserviço:
 
@@ -179,7 +180,7 @@ CLIENT_ID="ouros-worker"
 AUDIENCES="ms-example-api|ms-another-api"
 ```
 
-Clients `service` são confidenciais. O Keycloak gera e mantém o client secret; ele não é versionado no repositório. `AUDIENCES` de `mobile`, `web` e `service` só pode apontar para audiences declaradas por clients `microservice`. Valores múltiplos usam `|` como separador.
+Clients `service` são confidenciais. Clients `password-grant` também são confidenciais, mas existem somente para exceções internas explicitamente declaradas. O caso atual é `ms-ai-server-debug`, destinado ao Debug Console do AI Server e com audience limitada a `ms-ai-server`. O Keycloak gera e mantém o client secret; ele não é versionado no repositório. `AUDIENCES` de `mobile`, `web` e `service` só pode apontar para audiences declaradas por clients `microservice`. Valores múltiplos usam `|` como separador.
 
 Todo client `mobile` ou `web` gerenciado recebe também o default client scope `ouros-identity`. Em tokens de usuário ele mapeia `database_id`, `account_type`, `farm_id`, `enterprise_id` e `first_access`. Campos opcionais ausentes não são inventados. A autorização principal continua em `realm_access.roles`, enquanto `sub` identifica o sujeito federado do Keycloak.
 
@@ -347,7 +348,7 @@ O OTP expira por padrão em 5 minutos, aceita no máximo 5 tentativas e limita r
 - acessos públicos ao Keycloak usam HTTPS;
 - mobile e web são public clients com PKCE, sem client secret;
 - services são confidential clients, com secret gerado pelo Keycloak e service account habilitada;
-- Direct Access Grants e Implicit Flow permanecem desativados;
+- Direct Access Grants permanecem desativados para mobile, web, services e resource servers; a única exceção declarativa é um client `password-grant` interno e confidencial. Implicit Flow permanece desativado em todos os clients;
 - a sessão administrativa do `kcadm` fica apenas em `/tmp/keycloak-iac`;
 - `client_credentials` representa identidade de serviço e nunca identidade de usuário;
 - a comunicação Keycloak → `ms-auth-service` exige service JWT com issuer, audience e `azp` esperados;
