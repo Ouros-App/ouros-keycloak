@@ -258,7 +258,7 @@ validate_mobile_client_contract() {
   local mobile_file="iac/resources/ouros-mobile.conf"
   local actual expected actual_sorted expected_sorted redirects
 
-  expected="ms-spring-api|ms-ai-server|ms-telemetry-dashboard-service"
+  expected="ms-spring-api|ms-ai-server|ms-telemetry-dashboard-service|ms-mcp-server-ouros-knowledge"
 
   [[ -f "${mobile_file}" ]] || fail "${mobile_file}: official mobile client declaration is required"
   [[ "$(config_get "${mobile_file}" CLIENT_TYPE)" == "mobile" ]] \
@@ -274,7 +274,7 @@ validate_mobile_client_contract() {
   actual_sorted="$(tr '|' '\n' <<< "${actual}" | sed '/^$/d' | sort -u | paste -sd'|' -)"
   expected_sorted="$(tr '|' '\n' <<< "${expected}" | sort -u | paste -sd'|' -)"
   [[ "${actual_sorted}" == "${expected_sorted}" ]] \
-    || fail "${mobile_file}: AUDIENCES must contain the complete mobile resource-server set"
+    || fail "${mobile_file}: AUDIENCES must contain the complete mobile and delegated Midas resource-server set"
 }
 
 validate_group iac/resources '*.conf' production false
