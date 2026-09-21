@@ -296,7 +296,7 @@ scope_name_for_audience() {
 
   for file in "${resource_files[@]}"; do
     client_type="$(config_get "${file}" CLIENT_TYPE)"
-    [[ "${client_type}" == microservice ]] || continue
+    [[ "${client_type}" == microservice || "${client_type}" == token-exchange ]] || continue
 
     client_id="$(config_get "${file}" CLIENT_ID)"
     audience="$(config_get "${file}" AUDIENCE "${client_id}")"
@@ -385,6 +385,41 @@ reconcile_application() {
   echo "[keycloak-iac] ${client_type} client ${client_id} ready with Authorization Code + PKCE S256 and identity claims"
 }
 
+reconcile_token_exchange_audience() {
+  local file="$1"
+  local client_id audience scope_name mapper_name
+
+  client_id="$(config_get "${file}" CLIENT_ID)"
+  audience="$(config_get "${file}" AUDIENCE "${client_id}")"
+  scope_name="$(config_get "${file}" SCOPE_NAME "${client_id}-audience")"
+  mapper_name="$(config_get "${file}" MAPPER_NAME "${scope_name}")"
+
+  [[ -n "${client_id}" ]] || { echo "[keycloak-iac] CLIENT_ID missing in ${file}" >&2; return 1; }
+
+  ensure_audience_scope "${audience}" "${scope_name}" "${mapper_name}" >/dev/null
+  echo "[keycloak-iac] token-exchange requester audience ${audience} ready"
+}
+
+reconcile_token_exchange() {
+  local file="$1"
+  local client_id audiences client_uuid
+
+  client_id="$(config_get "${file}" CLIENT_ID)"
+  audiences="$(config_get "${file}" AUDIENCES)"
+
+  [[ -n "${client_id}" ]] || { echo "[keycloak-iac] CLIENT_ID missing in ${file}" >&2; return 1; }
+  [[ -n "${audiences}" ]] || { echo "[keycloak-iac] AUDIENCES missing for token-exchange client ${client_id}" >&2; return 1; }
+
+  echo "[keycloak-iac] reconciling token-exchange client ${client_id}"
+  client_uuid="$(upsert_base_client "${client_id}" false false '[]' '[]' false false false)"
+  kcadm_run update "clients/${client_uuid}" -r "${REALM}" \
+    -s 'attributes={"standard.token.exchange.enabled":"true"}' >/dev/null
+  attach_managed_audiences "${client_uuid}" "${client_id}" "${audiences}"
+  attach_default_scope "${client_uuid}" "${identity_scope_uuid}"
+
+  echo "[keycloak-iac] token-exchange client ${client_id} ready"
+}
+
 reconcile_service() {
   local file="$1"
   local client_id audiences client_uuid
@@ -435,6 +470,7 @@ for config_file in "${resource_files[@]}"; do
   client_type="$(config_get "${config_file}" CLIENT_TYPE)"
   case "${client_type}" in
     microservice) reconcile_microservice "${config_file}" ;;
+    token-exchange) reconcile_token_exchange_audience "${config_file}" ;;
     mobile|web|service|password-broker|password-grant) ;;
     *) echo "[keycloak-iac] unsupported CLIENT_TYPE '${client_type}' in ${config_file}" >&2; exit 1 ;;
   esac
@@ -445,6 +481,7 @@ for config_file in "${resource_files[@]}"; do
   case "${client_type}" in
     mobile|web) reconcile_application "${config_file}" ;;
     service) reconcile_service "${config_file}" ;;
+    token-exchange) reconcile_token_exchange "${config_file}" ;;
     password-broker|password-grant) reconcile_password_grant "${config_file}" ;;
   esac
 done
