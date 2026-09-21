@@ -55,6 +55,40 @@ jwt_payload() {
   printf '%s%s' "${segment}" "${padding}" | base64 --decode
 }
 
+verify_jwt_with_jwks() {
+  local token="$1"
+  local audience="$2"
+
+  docker exec -i \
+    -e JWT_TOKEN="${token}" \
+    -e JWT_ISSUER="http://localhost:${HOST_PORT}/realms/ouros" \
+    -e JWT_AUDIENCE="${audience}" \
+    -e JWT_JWKS_URL="http://${KEYCLOAK_CONTAINER}:8080/realms/ouros/protocol/openid-connect/certs" \
+    "${AUTH_CONTAINER}" python - <<'PY'
+import json
+import os
+
+import jwt
+from jwt import PyJWKClient
+
+token = os.environ["JWT_TOKEN"]
+jwks_url = os.environ["JWT_JWKS_URL"]
+issuer = os.environ["JWT_ISSUER"]
+audience = os.environ["JWT_AUDIENCE"]
+
+signing_key = PyJWKClient(jwks_url).get_signing_key_from_jwt(token)
+claims = jwt.decode(
+    token,
+    signing_key.key,
+    algorithms=["RS256"],
+    issuer=issuer,
+    audience=audience,
+    options={"require": ["exp", "iat", "iss", "aud", "sub"]},
+)
+print(json.dumps(claims, separators=(",", ":")))
+PY
+}
+
 command -v docker >/dev/null 2>&1 || { echo "docker is required" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
@@ -83,6 +117,9 @@ docker run -d \
   -v "${PWD}:/workspace:ro" \
   python:3.12-alpine \
   python /workspace/ci/mock-auth-service.py >/dev/null
+
+docker exec "${AUTH_CONTAINER}" \
+  pip install --quiet --disable-pip-version-check 'PyJWT[crypto]==2.14.0'
 
 echo "[integration] starting PostgreSQL"
 docker run -d \
@@ -136,7 +173,7 @@ docker run -d \
   "${IMAGE}" >/dev/null
 
 ready=false
-for _ in $(seq 1 90); do
+for _ in $(seq 1 150); do
   if curl -fsS "http://localhost:${HOST_PORT}/realms/ouros/.well-known/openid-configuration" >/dev/null 2>&1 \
     && docker logs "${KEYCLOAK_CONTAINER}" 2>&1 | grep -q '\[keycloak-iac\] reconciliation complete'; then
     ready=true
@@ -351,6 +388,58 @@ if ! jq -e '(.sub | type) == "string"
   and (has("enterprise_id") | not)' <<< "${login_payload}" >/dev/null; then
   echo "[integration] external-user token claims did not match the federated identity" >&2
   jq . <<< "${login_payload}" >&2
+  exit 1
+fi
+
+echo "[integration] verifying Phase 3 first-party broker token contract"
+phase3_broker_json="$(kcadm_get clients -r ouros -q clientId=ci-phase3-auth-broker)"
+phase3_broker_uuid="$(jq -r '.[0].id' <<< "${phase3_broker_json}")"
+[[ -n "${phase3_broker_uuid}" && "${phase3_broker_uuid}" != null ]] \
+  || { echo "[integration] Phase 3 broker client missing" >&2; exit 1; }
+jq -e 'length == 1
+  and .[0].publicClient == false
+  and .[0].standardFlowEnabled == false
+  and .[0].directAccessGrantsEnabled == true
+  and .[0].serviceAccountsEnabled == false
+  and .[0].clientAuthenticatorType == "client-secret"' \
+  <<< "${phase3_broker_json}" >/dev/null
+
+phase3_broker_secret="$(kcadm_get "clients/${phase3_broker_uuid}/client-secret" -r ouros | jq -r '.value')"
+[[ -n "${phase3_broker_secret}" && "${phase3_broker_secret}" != null ]] \
+  || { echo "[integration] Phase 3 broker secret missing" >&2; exit 1; }
+
+phase3_token_json="$(curl -fsS \
+  -u "ci-phase3-auth-broker:${phase3_broker_secret}" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'grant_type=password' \
+  --data-urlencode 'username=ci-user@example.com' \
+  --data-urlencode 'password=ci-password' \
+  "http://localhost:${HOST_PORT}/realms/ouros/protocol/openid-connect/token")"
+phase3_access_token="$(jq -r '.access_token' <<< "${phase3_token_json}")"
+[[ -n "${phase3_access_token}" && "${phase3_access_token}" != null ]] \
+  || { echo "[integration] Phase 3 broker access token missing" >&2; exit 1; }
+
+phase3_payload="$(verify_jwt_with_jwks "${phase3_access_token}" "ms-ai-server")"
+if ! jq -e '
+  def has_aud($name):
+    if (.aud | type) == "array"
+    then (.aud | index($name)) != null
+    else .aud == $name
+    end;
+  (.sub | type) == "string"
+  and has_aud("ms-spring-api")
+  and has_aud("ms-telemetry-dashboard-service")
+  and has_aud("ms-ai-server")
+  and has_aud("ms-mcp-server-ouros-knowledge")
+  and has_aud("ms-mcp-server-ouros-knowledge-codemode")
+  and (.realm_access.roles | index("farm_owner") != null)
+  and (.database_id == 42)
+  and (.account_type == "farm_owner")
+  and (.farm_id == 7)
+  and (.first_access == false)
+' <<< "${phase3_payload}" >/dev/null; then
+  echo "[integration] Phase 3 broker token contract mismatch" >&2
+  jq . <<< "${phase3_payload}" >&2
   exit 1
 fi
 

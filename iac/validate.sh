@@ -217,7 +217,26 @@ grep -qx 'VLAN=true' discloud.config || fail "discloud.config must keep VLAN=tru
 
 grep -q 'keycloak-entrypoint.sh' Dockerfile || fail "Dockerfile must run the IaC-aware entrypoint"
 
+validate_first_party_broker_contract() {
+  local broker_file="iac/resources/ms-auth-service-broker.conf"
+  local actual expected actual_sorted expected_sorted
+  expected="ms-spring-api|ms-telemetry-dashboard-service|ms-ai-server|ms-mcp-server-ouros-knowledge|ms-mcp-server-ouros-knowledge-codemode"
+
+  [[ -f "${broker_file}" ]] || fail "${broker_file}: official first-party broker declaration is required"
+  [[ "$(config_get "${broker_file}" CLIENT_TYPE)" == "password-broker" ]] \
+    || fail "${broker_file}: CLIENT_TYPE must remain password-broker"
+  [[ "$(config_get "${broker_file}" CLIENT_ID)" == "ms-auth-service-broker" ]] \
+    || fail "${broker_file}: CLIENT_ID must remain ms-auth-service-broker"
+
+  actual="$(config_get "${broker_file}" AUDIENCES)"
+  actual_sorted="$(tr '|' '\n' <<< "${actual}" | sed '/^$/d' | sort -u | paste -sd'|' -)"
+  expected_sorted="$(tr '|' '\n' <<< "${expected}" | sort -u | paste -sd'|' -)"
+  [[ "${actual_sorted}" == "${expected_sorted}" ]] \
+    || fail "${broker_file}: AUDIENCES must contain the complete Phase 3 first-party resource-server set"
+}
+
 validate_group iac/resources '*.conf' production false
+validate_first_party_broker_contract
 validate_group iac/examples '*.conf.example' examples true
 validate_group iac/test-fixtures '*.conf' test-fixtures true
 
