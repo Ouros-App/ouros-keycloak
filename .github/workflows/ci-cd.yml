@@ -120,11 +120,16 @@ jobs:
           test -f iac/sync-realm.sh
           test -f iac/sync-clients.sh
           test -f iac/sync-user-storage.sh
+          test -f iac/sync-email-otp.sh
           test -f scripts/keycloak-entrypoint.sh
           test -f ci/keycloak-integration.sh
           test -f ci/mock-auth-service.py
           test -f providers/ouros-user-storage/pom.xml
           test -f providers/ouros-user-storage/src/main/resources/META-INF/services/org.keycloak.storage.UserStorageProviderFactory
+          test -f providers/ouros-user-storage/src/main/resources/META-INF/services/org.keycloak.authentication.AuthenticatorFactory
+          test -f providers/ouros-user-storage/src/main/resources/theme-resources/templates/ouros-email-otp-login.ftl
+          test -f providers/ouros-user-storage/src/main/resources/theme-resources/templates/html/ouros-email-otp.ftl
+          test -f providers/ouros-user-storage/src/main/resources/theme-resources/templates/text/ouros-email-otp.ftl
           test -f iac/resources/ms-auth-service-internal.conf
           test -f iac/resources/keycloak-user-storage.conf
           test -f iac/user-storage/ouros-auth-service.conf
@@ -164,6 +169,7 @@ jobs:
           bash -n iac/sync-realm.sh
           bash -n iac/sync-clients.sh
           bash -n iac/sync-user-storage.sh
+          bash -n iac/sync-email-otp.sh
           bash -n scripts/keycloak-entrypoint.sh
           bash -n ci/keycloak-integration.sh
 
@@ -174,6 +180,7 @@ jobs:
           shellcheck iac/sync-realm.sh
           shellcheck iac/sync-clients.sh
           shellcheck iac/sync-user-storage.sh
+          shellcheck iac/sync-email-otp.sh
           shellcheck scripts/keycloak-entrypoint.sh
           shellcheck ci/keycloak-integration.sh
 

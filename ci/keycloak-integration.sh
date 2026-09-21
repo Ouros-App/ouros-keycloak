@@ -170,6 +170,16 @@ docker run -d \
   -e KC_DB_URL=jdbc:postgresql://keycloak-db:5432/keycloak \
   -e KC_DB_USERNAME=keycloak \
   -e KCRAW_DB_PASSWORD="${DB_PASSWORD}" \
+  -e OUROS_SMTP_HOST=mailpit \
+  -e OUROS_SMTP_PORT=1025 \
+  -e OUROS_SMTP_AUTH=false \
+  -e OUROS_SMTP_STARTTLS=false \
+  -e OUROS_SMTP_SSL=false \
+  -e OUROS_EMAIL_OTP_ENABLED=true \
+  -e OUROS_EMAIL_OTP_HMAC_SECRET=ci-email-otp-hmac-secret-0123456789abcdef \
+  -e OUROS_EMAIL_OTP_TTL_SECONDS=300 \
+  -e OUROS_EMAIL_OTP_MAX_ATTEMPTS=5 \
+  -e OUROS_EMAIL_OTP_RESEND_COOLDOWN_SECONDS=30 \
   "${IMAGE}" >/dev/null
 
 ready=false
@@ -218,7 +228,19 @@ jq -e '
   and .resetPasswordAllowed == false
   and .verifyEmail == false
   and .bruteForceProtected == true
+  and .browserFlow == "ouros-browser-email-otp"
+  and .smtpServer.host == "mailpit"
+  and .smtpServer.port == "1025"
+  and .smtpServer.auth == "false"
+  and .smtpServer.starttls == "false"
+  and .smtpServer.ssl == "false"
 ' <<< "${realm_json}" >/dev/null
+
+email_otp_executions="$(kcadm_get authentication/flows/ouros-browser-email-otp/executions -r ouros)"
+jq -e '
+  any(.[]; .providerId == "auth-username-password-form" and .requirement == "REQUIRED")
+  and any(.[]; .providerId == "ouros-email-otp" and .requirement == "REQUIRED")
+' <<< "${email_otp_executions}" >/dev/null
 
 roles_json="$(kcadm_get roles -r ouros)"
 for managed_role in farm_owner company_employee admin; do
@@ -473,6 +495,7 @@ echo "[integration] verifying idempotent reconciliation"
 docker exec "${KEYCLOAK_CONTAINER}" /bin/bash /opt/keycloak/iac/sync-realm.sh >/dev/null
 docker exec "${KEYCLOAK_CONTAINER}" /bin/bash /opt/keycloak/iac/sync-clients.sh >/dev/null
 docker exec "${KEYCLOAK_CONTAINER}" /bin/bash /opt/keycloak/iac/sync-user-storage.sh >/dev/null
+docker exec "${KEYCLOAK_CONTAINER}" /bin/bash /opt/keycloak/iac/sync-email-otp.sh >/dev/null
 
 components_after_reconcile="$(kcadm_get components -r ouros -q type=org.keycloak.storage.UserStorageProvider -q name=ouros-auth-service)"
 jq -e 'length == 1 and .[0].providerId == "ouros-auth-service"' <<< "${components_after_reconcile}" >/dev/null

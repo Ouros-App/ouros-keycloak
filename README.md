@@ -308,6 +308,38 @@ A CI valida:
         └── ci-service.conf
 ```
 
+## Email OTP e Mailpit local
+
+O fluxo interativo de Browser / Authorization Code + PKCE pode exigir um segundo fator por e-mail através do authenticator `ouros-email-otp`. Ele é opt-in e só é reconciliado quando `OUROS_EMAIL_OTP_ENABLED=true`.
+
+Para desenvolvimento, suba o Mailpit somente quando precisar testar entrega de e-mail:
+
+```bash
+docker compose -f docker-compose.mailpit.yml up -d
+```
+
+A UI fica em `http://127.0.0.1:8025` e o SMTP em `127.0.0.1:1025`. Endereços fake do banco funcionam normalmente porque o Mailpit captura a mensagem localmente e não tenta entregá-la na internet.
+
+Exemplo de configuração local quando o Keycloak consegue alcançar o host:
+
+```env
+OUROS_SMTP_HOST=host.docker.internal
+OUROS_SMTP_PORT=1025
+OUROS_SMTP_AUTH=false
+OUROS_SMTP_STARTTLS=false
+OUROS_SMTP_SSL=false
+OUROS_EMAIL_OTP_ENABLED=true
+OUROS_EMAIL_OTP_HMAC_SECRET=<segredo-aleatorio-de-pelo-menos-32-bytes>
+```
+
+O segredo HMAC deve ficar no secret manager e nunca no Git. O digest do OTP é protegido com HMAC-SHA-256 e o desafio é armazenado no armazenamento single-use do Keycloak, que garante consumo único mesmo em concorrência entre nós.
+
+Se o realm já usa um browser flow customizado, configure `OUROS_EMAIL_OTP_FALLBACK_BROWSER_FLOW` com o alias exato desse flow antes de habilitar o OTP. Assim, desabilitar `OUROS_EMAIL_OTP_ENABLED` restaura o flow correto em vez de assumir `browser`.
+
+Se Keycloak e Mailpit estiverem na mesma rede Docker, use `OUROS_SMTP_HOST=mailpit`. Não habilite o OTP sem SMTP: o reconciliador falha de forma explícita para evitar um fluxo de login impossível de concluir.
+
+O OTP expira por padrão em 5 minutos, aceita no máximo 5 tentativas e limita reenvios a um por 30 segundos. Esses valores podem ser ajustados com `OUROS_EMAIL_OTP_TTL_SECONDS`, `OUROS_EMAIL_OTP_MAX_ATTEMPTS` e `OUROS_EMAIL_OTP_RESEND_COOLDOWN_SECONDS`.
+
 ## Segurança
 
 - credenciais e client secrets nunca devem ser commitados;

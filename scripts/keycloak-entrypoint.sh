@@ -114,6 +114,7 @@ echo "[keycloak-iac] Admin API ready; reconciling managed resources"
 bash /opt/keycloak/iac/sync-realm.sh
 bash /opt/keycloak/iac/sync-clients.sh
 bash /opt/keycloak/iac/sync-user-storage.sh
+bash /opt/keycloak/iac/sync-email-otp.sh
 
 if [[ -n "${RECOVERY_ADMIN_USERNAME}" ]]; then
   recovery_user_response="$(
