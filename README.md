@@ -345,11 +345,13 @@ O OTP expira por padrão em 5 minutos, aceita no máximo 5 tentativas e limita r
 
 ### Smoke test E2E do mobile
 
-Depois de reconciliar o client `ouros-mobile` e habilitar SMTP + OTP em produção, rode:
+Depois de reconciliar o client `ouros-mobile` e habilitar SMTP + OTP em produção, use o smoke test mantido no repositório `ouros-docs`:
 
 ```bash
 python3 scripts/test-mobile-auth.py
 ```
+
+O comando acima é executado a partir de um checkout do `Ouros-App/ouros-docs`.
 
 O script usa o redirect loopback exato `http://127.0.0.1:8765/callback`, abre o Browser Flow real, espera senha + OTP no navegador, troca o authorization code com PKCE S256 e valida que o access token contém as audiences `ms-spring-api`, `ms-ai-server` e `ms-telemetry-dashboard-service`. Em seguida, usa o refresh token e valida o novo access token.
 
