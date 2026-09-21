@@ -401,7 +401,7 @@ reconcile_service() {
   echo "[keycloak-iac] service client ${client_id} ready for Client Credentials"
 }
 
-reconcile_password_broker() {
+reconcile_password_grant() {
   local file="$1"
   local client_id audiences client_uuid
 
@@ -410,12 +410,12 @@ reconcile_password_broker() {
 
   [[ -n "${client_id}" ]] || { echo "[keycloak-iac] CLIENT_ID missing in ${file}" >&2; return 1; }
 
-  echo "[keycloak-iac] reconciling password-grant broker ${client_id}"
+  echo "[keycloak-iac] reconciling restricted password-grant client ${client_id}"
   client_uuid="$(upsert_base_client "${client_id}" false false '[]' '[]' false false true)"
   attach_managed_audiences "${client_uuid}" "${client_id}" "${audiences}"
   attach_default_scope "${client_uuid}" "${identity_scope_uuid}"
 
-  echo "[keycloak-iac] password-grant broker ${client_id} ready for internal token relay"
+  echo "[keycloak-iac] restricted password-grant client ${client_id} ready"
 }
 
 shopt -s nullglob
@@ -435,7 +435,7 @@ for config_file in "${resource_files[@]}"; do
   client_type="$(config_get "${config_file}" CLIENT_TYPE)"
   case "${client_type}" in
     microservice) reconcile_microservice "${config_file}" ;;
-    mobile|web|service|password-broker) ;;
+    mobile|web|service|password-broker|password-grant) ;;
     *) echo "[keycloak-iac] unsupported CLIENT_TYPE '${client_type}' in ${config_file}" >&2; exit 1 ;;
   esac
 done
@@ -445,6 +445,6 @@ for config_file in "${resource_files[@]}"; do
   case "${client_type}" in
     mobile|web) reconcile_application "${config_file}" ;;
     service) reconcile_service "${config_file}" ;;
-    password-broker) reconcile_password_broker "${config_file}" ;;
+    password-broker|password-grant) reconcile_password_grant "${config_file}" ;;
   esac
 done
