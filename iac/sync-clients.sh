@@ -357,7 +357,47 @@ detach_stale_managed_audiences() {
     --fields id,name --format csv --noquotes)"
 
   while IFS=',' read -r scope_uuid scope_name; do
-    scope_uuid="${scope_uuid%
+    [[ "${scope_uuid}" == id ]] && continue
+    [[ -n "${scope_uuid}" && -n "${scope_name}" ]] || continue
+
+    if is_managed_audience_scope_name "${scope_name}" \
+      && ! scope_name_is_desired "${scope_name}" "${audiences}"; then
+      kcadm_run delete "clients/${client_uuid}/default-client-scopes/${scope_uuid}" \
+        -r "${REALM}" >/dev/null
+      echo "[keycloak-iac] detached stale managed audience scope ${scope_name} from ${client_id}"
+    fi
+  done <<< "${output}"
+}
+
+attach_managed_audiences() {
+  local client_uuid="$1"
+  local client_id="$2"
+  local audiences="$3"
+  local audience scope_name scope_uuid
+  local -a audience_items=()
+
+  detach_stale_managed_audiences "${client_uuid}" "${client_id}" "${audiences}"
+
+  [[ -n "${audiences}" ]] || return 0
+
+  IFS='|' read -r -a audience_items <<< "${audiences}"
+  for audience in "${audience_items[@]}"; do
+    if ! scope_name="$(scope_name_for_audience "${audience}")"; then
+      echo "[keycloak-iac] ${client_id} references unmanaged audience ${audience}" >&2
+      return 1
+    fi
+
+    scope_uuid="$(csv_lookup_id client-scopes name "${scope_name}")"
+    if [[ -z "${scope_uuid}" ]]; then
+      echo "[keycloak-iac] audience scope ${scope_name} for ${audience} does not exist" >&2
+      return 1
+    fi
+
+    attach_default_scope "${client_uuid}" "${scope_uuid}"
+    echo "[keycloak-iac] attached audience ${audience} to ${client_id}"
+  done
+}
+
 reconcile_microservice() {
   local file="$1"
   local client_id audience scope_name mapper_name client_uuid scope_uuid
