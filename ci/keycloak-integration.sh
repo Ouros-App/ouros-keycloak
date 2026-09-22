@@ -470,6 +470,26 @@ token_exchange_secret="$(kcadm_get "clients/${token_exchange_uuid}/client-secret
 [[ -n "${token_exchange_secret}" && "${token_exchange_secret}" != null ]] \
   || { echo "[integration] token-exchange client secret missing" >&2; exit 1; }
 
+ineligible_exchange_file="$(mktemp)"
+ineligible_exchange_status="$(curl -sS -o "${ineligible_exchange_file}" -w '%{http_code}' \
+  -u "ci-token-exchange:${token_exchange_secret}" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+  --data-urlencode "subject_token=${login_access_token}" \
+  --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:access_token' \
+  --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+  --data-urlencode 'audience=ci-api' \
+  "http://localhost:${HOST_PORT}/realms/ouros/protocol/openid-connect/token")"
+if [[ "${ineligible_exchange_status}" == 200 ]]; then
+  echo "[integration] token without ci-token-exchange audience was exchanged" >&2
+  cat "${ineligible_exchange_file}" >&2
+  rm -f "${ineligible_exchange_file}"
+  exit 1
+fi
+[[ "${ineligible_exchange_status}" == 400 || "${ineligible_exchange_status}" == 403 ]] \
+  || { echo "[integration] unexpected ineligible exchange HTTP ${ineligible_exchange_status}" >&2; cat "${ineligible_exchange_file}" >&2; rm -f "${ineligible_exchange_file}"; exit 1; }
+rm -f "${ineligible_exchange_file}"
+
 exchanged_token_json="$(curl -fsS \
   -u "ci-token-exchange:${token_exchange_secret}" \
   -H 'Content-Type: application/x-www-form-urlencoded' \
