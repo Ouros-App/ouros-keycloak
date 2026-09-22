@@ -1,0 +1,7 @@
+# Confidential backend client for Standard Token Exchange v2.
+# AUDIENCE is the requester audience required in incoming subject tokens.
+# AUDIENCES are the target resource audiences available after exchange.
+CLIENT_TYPE="token-exchange"
+CLIENT_ID="ouros-api-delegator"
+AUDIENCE="ouros-api-delegator"
+AUDIENCES="ms-example-api"

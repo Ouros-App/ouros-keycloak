@@ -153,14 +153,16 @@ SCOPE_NAME="ms-example-api-audience"
 MAPPER_NAME="ms-example-api-audience"
 ```
 
-Exemplo mobile:
+Client mobile de produção:
 
 ```bash
 CLIENT_TYPE="mobile"
 CLIENT_ID="ouros-mobile"
-REDIRECT_URIS="com.ouros.app:/oauth2redirect"
-AUDIENCES="ms-example-api|ms-another-api"
+REDIRECT_URIS="com.ourosapp.ourosandroidapp:/oauth2redirect|http://127.0.0.1:8765/callback"
+AUDIENCES="ms-spring-api|ms-ai-server|ms-telemetry-dashboard-service|ms-mcp-server-ouros-knowledge"
 ```
+
+O app autentica uma única vez via Authorization Code + PKCE S256. O access token pode ser enviado como Bearer para as três APIs mobile-facing. Ele também inclui a audience interna `ms-mcp-server-ouros-knowledge`, porque o AI Server encaminha o mesmo JWT ao Knowledge MCP durante chamadas do Midas. O refresh token é enviado somente ao endpoint de token do Keycloak. O redirect loopback em `127.0.0.1:8765` existe apenas para o script operacional de teste E2E; o Android usa o custom scheme.
 
 Exemplo web:
 
@@ -340,6 +342,26 @@ Se o realm já usa um browser flow customizado, configure `OUROS_EMAIL_OTP_FALLB
 Se Keycloak e Mailpit estiverem na mesma rede Docker, use `OUROS_SMTP_HOST=mailpit`. Não habilite o OTP sem SMTP: o reconciliador falha de forma explícita para evitar um fluxo de login impossível de concluir.
 
 O OTP expira por padrão em 5 minutos, aceita no máximo 5 tentativas e limita reenvios a um por 30 segundos. Esses valores podem ser ajustados com `OUROS_EMAIL_OTP_TTL_SECONDS`, `OUROS_EMAIL_OTP_MAX_ATTEMPTS` e `OUROS_EMAIL_OTP_RESEND_COOLDOWN_SECONDS`.
+
+### Smoke test E2E do mobile
+
+Depois de reconciliar o client `ouros-mobile` e habilitar SMTP + OTP em produção, use o smoke test mantido no repositório `ouros-docs`:
+
+```bash
+python3 scripts/test-mobile-auth.py
+```
+
+O comando acima é executado a partir de um checkout do `Ouros-App/ouros-docs`.
+
+O script usa o redirect loopback exato `http://127.0.0.1:8765/callback`, abre o Browser Flow real, espera senha + OTP no navegador, troca o authorization code com PKCE S256 e valida que o access token contém as audiences mobile-facing `ms-spring-api`, `ms-ai-server`, `ms-telemetry-dashboard-service` e a audience delegada `ms-mcp-server-ouros-knowledge`. Em seguida, usa o refresh token e valida o novo access token.
+
+Tokens não são impressos por padrão. Para um teste manual explícito de APIs:
+
+```bash
+python3 scripts/test-mobile-auth.py --output ./mobile-auth-tokens.json
+```
+
+O arquivo é criado com permissão `0600` quando suportado e deve ser apagado após o teste.
 
 ## Segurança
 
