@@ -579,11 +579,30 @@ jq -e --arg subject "$(jq -r '.sub' <<< "${login_payload}")" '
   and (has("enterprise_id") | not)
 ' <<< "${refreshed_payload}" >/dev/null
 
+echo "[integration] verifying stale managed audiences are removed"
+docker exec -e HOME=/tmp/ci-verify "${KEYCLOAK_CONTAINER}" \
+  /opt/keycloak/bin/kcadm.sh update \
+  "clients/${debug_grant_uuid}/default-client-scopes/${scope_uuid}" \
+  -r ouros -n >/dev/null
+
+debug_scopes_with_stale="$(kcadm_get "clients/${debug_grant_uuid}/default-client-scopes" -r ouros)"
+jq -e '.[] | select(.name == "ci-api-audience")' <<< "${debug_scopes_with_stale}" >/dev/null
+
 echo "[integration] verifying idempotent reconciliation"
 docker exec "${KEYCLOAK_CONTAINER}" /bin/bash /opt/keycloak/iac/sync-realm.sh >/dev/null
 docker exec "${KEYCLOAK_CONTAINER}" /bin/bash /opt/keycloak/iac/sync-clients.sh >/dev/null
 docker exec "${KEYCLOAK_CONTAINER}" /bin/bash /opt/keycloak/iac/sync-user-storage.sh >/dev/null
 docker exec "${KEYCLOAK_CONTAINER}" /bin/bash /opt/keycloak/iac/sync-email-otp.sh >/dev/null
+
+debug_scopes_after_reconcile="$(kcadm_get "clients/${debug_grant_uuid}/default-client-scopes" -r ouros)"
+jq -e '[.[] | select(.name == "ci-api-audience")] | length == 0' \
+  <<< "${debug_scopes_after_reconcile}" >/dev/null
+jq -e '.[] | select(.name == "ci-token-exchange-audience")' \
+  <<< "${debug_scopes_after_reconcile}" >/dev/null
+jq -e '.[] | select(.name == "ci-auth-api-audience")' \
+  <<< "${debug_scopes_after_reconcile}" >/dev/null
+jq -e '.[] | select(.name == "ouros-identity")' \
+  <<< "${debug_scopes_after_reconcile}" >/dev/null
 
 components_after_reconcile="$(kcadm_get components -r ouros -q type=org.keycloak.storage.UserStorageProvider -q name=ouros-auth-service)"
 jq -e 'length == 1 and .[0].providerId == "ouros-auth-service"' <<< "${components_after_reconcile}" >/dev/null
