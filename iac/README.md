@@ -81,6 +81,20 @@ AUDIENCES="ms-example-api|ms-another-api"
 
 Valores múltiplos usam `|` como separador. Não use `*` em `WEB_ORIGINS`; mantenha as origens explícitas.
 
+### Prometheus
+
+O Prometheus do homelab usa o client confidencial `ouros-prometheus` com Client Credentials. Ele recebe somente as audiences dos resource servers que fazem parte da superfície de scrape:
+
+```bash
+CLIENT_TYPE="service"
+CLIENT_ID="ouros-prometheus"
+AUDIENCES="ms-ai-server|ms-spring-api|ms-mcp-server-ouros-knowledge|ms-telemetry-dashboard-service"
+```
+
+O secret é gerado pelo Keycloak no deploy e deve ser entregue ao runtime do Prometheus por um canal seguro. Nunca versione o secret no repositório.
+
+O client não recebe a audience `ms-auth-service-internal`: os endpoints internos de identidade pertencem exclusivamente ao User Storage do Keycloak e não fazem parte da superfície de observabilidade.
+
 ## Claims de identidade
 
 O reconciliador mantém um default client scope chamado `ouros-identity` e o anexa automaticamente aos clients `mobile` e `web` gerenciados. Ele publica somente no access token/userinfo os atributos necessários para a transição do domínio legado:
