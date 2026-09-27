@@ -307,11 +307,30 @@ validate_token_exchange_contract() {
     || fail "${exchange_file}: target audience must remain the standard Knowledge MCP"
 }
 
+validate_prometheus_client_contract() {
+  local prometheus_file="iac/resources/ouros-prometheus.conf"
+  local actual expected actual_sorted expected_sorted
+  expected="ms-ai-server|ms-spring-api|ms-mcp-server-ouros-knowledge|ms-telemetry-dashboard-service"
+
+  [[ -f "${prometheus_file}" ]] || fail "${prometheus_file}: Prometheus service declaration is required"
+  [[ "$(config_get "${prometheus_file}" CLIENT_TYPE)" == "service" ]] \
+    || fail "${prometheus_file}: CLIENT_TYPE must remain service"
+  [[ "$(config_get "${prometheus_file}" CLIENT_ID)" == "ouros-prometheus" ]] \
+    || fail "${prometheus_file}: CLIENT_ID must remain ouros-prometheus"
+
+  actual="$(config_get "${prometheus_file}" AUDIENCES)"
+  actual_sorted="$(tr '|' '\n' <<< "${actual}" | sed '/^$/d' | sort -u | paste -sd'|' -)"
+  expected_sorted="$(tr '|' '\n' <<< "${expected}" | sort -u | paste -sd'|' -)"
+  [[ "${actual_sorted}" == "${expected_sorted}" ]] \
+    || fail "${prometheus_file}: AUDIENCES must contain the complete Prometheus scrape surface"
+}
+
 validate_group iac/resources '*.conf' production false
 validate_token_exchange_contract
 validate_first_party_broker_contract
 validate_debug_console_contract
 validate_mobile_client_contract
+validate_prometheus_client_contract
 validate_group iac/examples '*.conf.example' examples true
 validate_group iac/test-fixtures '*.conf' test-fixtures true
 
