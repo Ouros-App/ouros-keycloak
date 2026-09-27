@@ -91,7 +91,7 @@ CLIENT_ID="ouros-prometheus"
 AUDIENCES="ms-ai-server|ms-spring-api|ms-mcp-server-ouros-knowledge|ms-telemetry-dashboard-service"
 ```
 
-O secret é gerado pelo Keycloak no deploy e deve ser entregue ao runtime do Prometheus por um canal seguro. Nunca versione o secret no repositório.
+O secret é gerado pelo Keycloak no deploy. Para obtê-lo e armazená-lo, siga o procedimento descrito em [User Storage e service secrets](#user-storage-e-service-secrets). No ambiente de observabilidade, armazene o valor no secret manager como `PROMETHEUS_KEYCLOAK_CLIENT_SECRET` e materialize-o no container em `/run/secrets/keycloak_client_secret`; o `prometheus.yml` deve referenciar esse arquivo por `oauth2.client_secret_file`. Nunca versione o secret no repositório, no Compose ou no arquivo de configuração do Prometheus.
 
 O client não recebe a audience `ms-auth-service-internal`: os endpoints internos de identidade pertencem exclusivamente ao User Storage do Keycloak e não fazem parte da superfície de observabilidade.
 
