@@ -88,7 +88,7 @@ O Prometheus do homelab usa o client confidencial `ouros-prometheus` com Client 
 ```bash
 CLIENT_TYPE="service"
 CLIENT_ID="ouros-prometheus"
-AUDIENCES="ms-ai-server|ms-spring-api|ms-mcp-server-ouros-knowledge|ms-telemetry-dashboard-service"
+AUDIENCES="ms-ai-server|ms-spring-api|ms-mcp-server-ouros-knowledge|ms-telemetry-dashboard-service|ms-auth-service"
 ```
 
 O secret é gerado pelo Keycloak no deploy. Para obtê-lo e armazená-lo, siga o procedimento descrito em [User Storage e service secrets](#user-storage-e-service-secrets). No ambiente de observabilidade, armazene o valor no secret manager como `PROMETHEUS_KEYCLOAK_CLIENT_SECRET` e materialize-o no container em `/run/secrets/keycloak_client_secret`; o `prometheus.yml` deve referenciar esse arquivo por `oauth2.client_secret_file`. Nunca versione o secret no repositório, no Compose ou no arquivo de configuração do Prometheus.
