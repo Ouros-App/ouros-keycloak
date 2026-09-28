@@ -310,7 +310,7 @@ validate_token_exchange_contract() {
 validate_prometheus_client_contract() {
   local prometheus_file="iac/resources/ouros-prometheus.conf"
   local actual expected actual_sorted expected_sorted
-  expected="ms-ai-server|ms-spring-api|ms-mcp-server-ouros-knowledge|ms-telemetry-dashboard-service"
+  expected="ms-ai-server|ms-spring-api|ms-mcp-server-ouros-knowledge|ms-telemetry-dashboard-service|ms-auth-service"
 
   [[ -f "${prometheus_file}" ]] || fail "${prometheus_file}: Prometheus service declaration is required"
   [[ "$(config_get "${prometheus_file}" CLIENT_TYPE)" == "service" ]] \
