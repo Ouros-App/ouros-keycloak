@@ -121,7 +121,7 @@ Uma mudança de client passa portanto pelo mesmo fluxo de revisão de código da
 
 ## Audiences
 
-`AUDIENCES` de clients `mobile`, `web` e `service` só pode referenciar audiences declaradas por clients `microservice` no mesmo diretório gerenciado. O reconciliador primeiro cria todos os resource servers e scopes e só depois configura os clients consumidores, então a ordem dos arquivos não importa.
+`AUDIENCES` de clients `mobile`, `web` e `service` só pode referenciar audiences declaradas por clients `microservice` no mesmo diretório gerenciado. Em um client `token-exchange`, a lista limita os resource servers para os quais aquele backend pode pedir tokens delegados. O reconciliador primeiro cria todos os resource servers e scopes e só depois configura os clients consumidores, então a ordem dos arquivos não importa.
 
 Exemplo:
 
