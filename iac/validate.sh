@@ -295,6 +295,8 @@ validate_mobile_client_contract() {
 
 validate_token_exchange_contract() {
   local exchange_file="iac/resources/ms-ai-server-mcp-exchange.conf"
+  local actual expected actual_sorted expected_sorted
+  expected="ms-mcp-server-ouros-knowledge|ms-telemetry-dashboard-service"
 
   [[ -f "${exchange_file}" ]] || fail "${exchange_file}: official Midas token-exchange client is required"
   [[ "$(config_get "${exchange_file}" CLIENT_TYPE)" == "token-exchange" ]] \
@@ -303,8 +305,11 @@ validate_token_exchange_contract() {
     || fail "${exchange_file}: CLIENT_ID must remain ms-ai-server-mcp-exchange"
   [[ "$(config_get "${exchange_file}" AUDIENCE)" == "ms-ai-server-mcp-exchange" ]] \
     || fail "${exchange_file}: requester audience must remain ms-ai-server-mcp-exchange"
-  [[ "$(config_get "${exchange_file}" AUDIENCES)" == "ms-mcp-server-ouros-knowledge" ]] \
-    || fail "${exchange_file}: target audience must remain the standard Knowledge MCP"
+  actual="$(config_get "${exchange_file}" AUDIENCES)"
+  actual_sorted="$(tr '|' '\n' <<< "${actual}" | sed '/^$/d' | sort -u | paste -sd'|' -)"
+  expected_sorted="$(tr '|' '\n' <<< "${expected}" | sort -u | paste -sd'|' -)"
+  [[ "${actual_sorted}" == "${expected_sorted}" ]] \
+    || fail "${exchange_file}: target audiences must include Knowledge MCP and Telemetry"
 }
 
 validate_prometheus_client_contract() {
