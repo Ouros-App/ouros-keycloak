@@ -43,6 +43,7 @@ class OurosUserAdapterTest {
                   "account_type": "farm_owner",
                   "realm_role": "farm_owner",
                   "name": "User Test",
+                  "photo_url": "https://cdn.ouros.app/avatars/42.png",
                   "farm_id": 7,
                   "enterprise_id": null,
                   "first_access": false
@@ -69,10 +70,14 @@ class OurosUserAdapterTest {
         assertEquals(List.of("42"), attributes.get(OurosUserAdapter.DATABASE_ID));
         assertEquals(List.of("farm_owner"), attributes.get(OurosUserAdapter.ACCOUNT_TYPE));
         assertEquals(List.of("farm_owner"), attributes.get(OurosUserAdapter.REALM_ROLE));
+        assertEquals(List.of("User Test"), attributes.get(OurosUserAdapter.NAME));
+        assertEquals(List.of("https://cdn.ouros.app/avatars/42.png"), attributes.get(OurosUserAdapter.PHOTO_URL));
         assertEquals(List.of("7"), attributes.get(OurosUserAdapter.FARM_ID));
         assertFalse(attributes.containsKey(OurosUserAdapter.ENTERPRISE_ID));
         assertEquals(List.of("false"), attributes.get(OurosUserAdapter.FIRST_ACCESS));
         assertEquals("42", adapter.getFirstAttribute(OurosUserAdapter.DATABASE_ID));
+        assertEquals("User Test", adapter.getFirstAttribute(OurosUserAdapter.NAME));
+        assertEquals("https://cdn.ouros.app/avatars/42.png", adapter.getFirstAttribute(OurosUserAdapter.PHOTO_URL));
         assertNull(adapter.getFirstAttribute("missing"));
         assertEquals(List.of("farm_owner"), adapter.getAttributeStream(
                 OurosUserAdapter.REALM_ROLE

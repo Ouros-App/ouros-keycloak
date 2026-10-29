@@ -103,6 +103,8 @@ O reconciliador mantém um default client scope chamado `ouros-identity` e o ane
 | --- | --- | --- |
 | `database_id` | ID da linha no banco legado | `long` |
 | `account_type` | `farm_owner`, `company_employee` ou `admin` | `String` |
+| `name` | nome de exibição do usuário no banco legado | `String` |
+| `photo_url` | URL da foto de perfil, quando existir | `String` |
 | `farm_id` | fazenda associada, quando existir | `long` |
 | `enterprise_id` | empresa associada, quando existir | `long` |
 | `first_access` | estado legado do primeiro acesso, quando existir | `boolean` |

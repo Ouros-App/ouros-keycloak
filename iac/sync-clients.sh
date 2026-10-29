@@ -275,6 +275,8 @@ ensure_identity_scope() {
 
   ensure_user_attribute_mapper "${scope_uuid}" database_id database_id long
   ensure_user_attribute_mapper "${scope_uuid}" account_type account_type String
+  ensure_user_attribute_mapper "${scope_uuid}" name name String
+  ensure_user_attribute_mapper "${scope_uuid}" photo_url photo_url String
   ensure_user_attribute_mapper "${scope_uuid}" farm_id farm_id long
   ensure_user_attribute_mapper "${scope_uuid}" enterprise_id enterprise_id long
   ensure_user_attribute_mapper "${scope_uuid}" first_access first_access boolean
