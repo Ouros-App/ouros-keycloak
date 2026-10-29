@@ -293,9 +293,11 @@ jq -e '.[] | select(.name == "ci-api-audience" and .protocolMapper == "oidc-audi
 identity_mappers="$(kcadm_get "client-scopes/${identity_scope_uuid}/protocol-mappers/models" -r ouros)"
 jq -e '
   map(select(.protocolMapper == "oidc-usermodel-attribute-mapper")) as $mappers
-  | ($mappers | length) == 5
+  | ($mappers | length) == 7
   and any($mappers[]; .name == "ouros-database_id" and .config["user.attribute"] == "database_id" and .config["claim.name"] == "database_id" and .config["jsonType.label"] == "long" and .config["access.token.claim"] == "true")
   and any($mappers[]; .name == "ouros-account_type" and .config["user.attribute"] == "account_type" and .config["claim.name"] == "account_type" and .config["jsonType.label"] == "String" and .config["access.token.claim"] == "true")
+  and any($mappers[]; .name == "ouros-name" and .config["user.attribute"] == "name" and .config["claim.name"] == "name" and .config["jsonType.label"] == "String" and .config["access.token.claim"] == "true")
+  and any($mappers[]; .name == "ouros-photo_url" and .config["user.attribute"] == "photo_url" and .config["claim.name"] == "photo_url" and .config["jsonType.label"] == "String" and .config["access.token.claim"] == "true")
   and any($mappers[]; .name == "ouros-farm_id" and .config["user.attribute"] == "farm_id" and .config["claim.name"] == "farm_id" and .config["jsonType.label"] == "long" and .config["access.token.claim"] == "true")
   and any($mappers[]; .name == "ouros-enterprise_id" and .config["user.attribute"] == "enterprise_id" and .config["claim.name"] == "enterprise_id" and .config["jsonType.label"] == "long" and .config["access.token.claim"] == "true")
   and any($mappers[]; .name == "ouros-first_access" and .config["user.attribute"] == "first_access" and .config["claim.name"] == "first_access" and .config["jsonType.label"] == "boolean" and .config["access.token.claim"] == "true")
@@ -425,9 +427,11 @@ if ! jq -e '(.sub | type) == "string"
   and (.realm_access.roles | index("farm_owner") != null)
   and (.database_id == 42)
   and (.account_type == "farm_owner")
+  and (.name == "CI User")
   and (.farm_id == 7)
   and (.first_access == false)
-  and (has("enterprise_id") | not)' <<< "${login_payload}" >/dev/null; then
+  and (has("enterprise_id") | not)
+  and (has("photo_url") | not)' <<< "${login_payload}" >/dev/null; then
   echo "[integration] external-user token claims did not match the federated identity" >&2
   jq . <<< "${login_payload}" >&2
   exit 1
@@ -565,6 +569,7 @@ if ! jq -e '
   and (.realm_access.roles | index("farm_owner") != null)
   and (.database_id == 42)
   and (.account_type == "farm_owner")
+  and (.name == "CI User")
   and (.farm_id == 7)
   and (.first_access == false)
 ' <<< "${phase3_payload}" >/dev/null; then
@@ -594,6 +599,7 @@ jq -e --arg subject "$(jq -r '.sub' <<< "${login_payload}")" '
   and (.realm_access.roles | index("farm_owner") != null)
   and (.database_id == 42)
   and (.account_type == "farm_owner")
+  and (.name == "CI User")
   and (.farm_id == 7)
   and (.first_access == false)
   and (has("enterprise_id") | not)
@@ -630,7 +636,7 @@ jq -e 'length == 1 and .[0].providerId == "ouros-auth-service"' <<< "${component
 scopes_after_reconcile="$(kcadm_get client-scopes -r ouros)"
 jq -e '[.[] | select(.name == "ouros-identity")] | length == 1' <<< "${scopes_after_reconcile}" >/dev/null
 identity_mappers_after_reconcile="$(kcadm_get "client-scopes/${identity_scope_uuid}/protocol-mappers/models" -r ouros)"
-jq -e '[.[] | select(.name | startswith("ouros-"))] | length == 5' <<< "${identity_mappers_after_reconcile}" >/dev/null
+jq -e '[.[] | select(.name | startswith("ouros-"))] | length == 7' <<< "${identity_mappers_after_reconcile}" >/dev/null
 
 curl -fsS "http://localhost:${HOST_PORT}/realms/ouros/protocol/openid-connect/certs" \
   | jq -e '.keys | length > 0' >/dev/null

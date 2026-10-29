@@ -16,6 +16,7 @@ class OurosIdentityTest {
                   "account_type": "farm_owner",
                   "realm_role": "farm_owner",
                   "name": "Maria da Silva",
+                  "photo_url": "https://cdn.ouros.app/avatars/42.png",
                   "farm_id": 7,
                   "enterprise_id": null,
                   "first_access": false
@@ -27,6 +28,7 @@ class OurosIdentityTest {
         assertEquals("farm_owner", identity.accountType());
         assertEquals("farm_owner", identity.realmRole());
         assertEquals("Maria da Silva", identity.name());
+        assertEquals("https://cdn.ouros.app/avatars/42.png", identity.photoUrl());
         assertEquals(7L, identity.farmId());
         assertNull(identity.enterpriseId());
         assertFalse(identity.firstAccess());
@@ -48,6 +50,7 @@ class OurosIdentityTest {
 
         assertEquals("admin", identity.firstName());
         assertEquals("ouros", identity.lastName());
+        assertNull(identity.photoUrl());
         assertNull(identity.farmId());
         assertNull(identity.enterpriseId());
         assertNull(identity.firstAccess());
@@ -119,9 +122,13 @@ class OurosIdentityTest {
         var numericName = JsonSerialization.mapper.readTree("""
                 {"id":1,"email":"a@b.com","account_type":"admin","realm_role":"admin","name":123}
                 """);
+        var numericPhotoUrl = JsonSerialization.mapper.readTree("""
+                {"id":1,"email":"a@b.com","account_type":"admin","realm_role":"admin","photo_url":123}
+                """);
 
         assertThrows(IllegalArgumentException.class, () -> OurosIdentity.fromJson(numericEmail));
         assertThrows(IllegalArgumentException.class, () -> OurosIdentity.fromJson(numericName));
+        assertThrows(IllegalArgumentException.class, () -> OurosIdentity.fromJson(numericPhotoUrl));
     }
 
     @Test

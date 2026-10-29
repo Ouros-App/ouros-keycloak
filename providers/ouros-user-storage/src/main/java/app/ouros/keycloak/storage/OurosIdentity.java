@@ -8,6 +8,7 @@ final class OurosIdentity {
     private final String accountType;
     private final String realmRole;
     private final String name;
+    private final String photoUrl;
     private final Long farmId;
     private final Long enterpriseId;
     private final Boolean firstAccess;
@@ -23,6 +24,7 @@ final class OurosIdentity {
         this.accountType = requiredText(node, "account_type");
         this.realmRole = requiredText(node, "realm_role");
         this.name = nullableText(node, "name");
+        this.photoUrl = nullableText(node, "photo_url");
         this.farmId = nullableLong(node, "farm_id");
         this.enterpriseId = nullableLong(node, "enterprise_id");
         JsonNode firstAccessNode = node.get("first_access");
@@ -77,6 +79,7 @@ final class OurosIdentity {
     String accountType() { return accountType; }
     String realmRole() { return realmRole; }
     String name() { return name; }
+    String photoUrl() { return photoUrl; }
     Long farmId() { return farmId; }
     Long enterpriseId() { return enterpriseId; }
     Boolean firstAccess() { return firstAccess; }

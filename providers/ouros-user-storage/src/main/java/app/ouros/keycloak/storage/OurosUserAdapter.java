@@ -20,6 +20,8 @@ final class OurosUserAdapter extends AbstractUserAdapter {
     static final String DATABASE_ID = "database_id";
     static final String ACCOUNT_TYPE = "account_type";
     static final String REALM_ROLE = "realm_role";
+    static final String NAME = "name";
+    static final String PHOTO_URL = "photo_url";
     static final String FARM_ID = "farm_id";
     static final String ENTERPRISE_ID = "enterprise_id";
     static final String FIRST_ACCESS = "first_access";
@@ -97,6 +99,8 @@ final class OurosUserAdapter extends AbstractUserAdapter {
         put(attributes, DATABASE_ID, Long.toString(identity.databaseId()));
         put(attributes, ACCOUNT_TYPE, identity.accountType());
         put(attributes, REALM_ROLE, identity.realmRole());
+        put(attributes, NAME, identity.name());
+        put(attributes, PHOTO_URL, identity.photoUrl());
         put(attributes, FARM_ID, asString(identity.farmId()));
         put(attributes, ENTERPRISE_ID, asString(identity.enterpriseId()));
         put(attributes, FIRST_ACCESS, asString(identity.firstAccess()));
