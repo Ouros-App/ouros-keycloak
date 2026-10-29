@@ -6,13 +6,24 @@
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
-  "resetPasswordAllowed": true,
+  "resetPasswordAllowed": false,
   "editUsernameAllowed": false,
   "roles": {
     "realm": [
-      { "name": "farm_owner", "description": "Farm owner user" },
-      { "name": "company_employee", "description": "Company employee user" },
-      { "name": "admin", "description": "Ouros administrator" }
+      {
+        "name": "farm_owner",
+        "description": "Farm owner user"
+      },
+      {
+        "name": "company_employee",
+        "description": "Company employee user"
+      },
+      {
+        "name": "admin",
+        "description": "Ouros administrator"
+      }
     ]
-  }
+  },
+  "verifyEmail": false,
+  "bruteForceProtected": true
 }

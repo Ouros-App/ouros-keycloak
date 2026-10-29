@@ -4,6 +4,7 @@ set -Eeuo pipefail
 KCADM="/opt/keycloak/bin/kcadm.sh"
 REALM="${KC_IAC_REALM:-ouros}"
 RESOURCE_DIR="${KC_IAC_RESOURCE_DIR:-/opt/keycloak/iac/resources}"
+IDENTITY_SCOPE_NAME="${KC_IAC_IDENTITY_SCOPE_NAME:-ouros-identity}"
 
 kcadm_run() {
   local output status
@@ -146,7 +147,7 @@ upsert_base_client() {
     settings+=( -s 'attributes={}' )
   fi
 
-  if [[ "${service_accounts}" == true || "${direct_access_grants}" == true ]]; then
+  if [[ "${public_client}" == false ]]; then
     settings+=( -s clientAuthenticatorType=client-secret )
   fi
 
@@ -219,6 +220,70 @@ ensure_audience_scope() {
   printf '%s' "${scope_uuid}"
 }
 
+ensure_user_attribute_mapper() {
+  local scope_uuid="$1"
+  local attribute_name="$2"
+  local claim_name="$3"
+  local json_type="$4"
+  local mapper_name="ouros-${claim_name}"
+  local mapper_output mapper_uuid
+
+  mapper_output="$(kcadm_run get "client-scopes/${scope_uuid}/protocol-mappers/models" -r "${REALM}"     --fields id,name --format csv --noquotes)"
+  mapper_uuid="$(csv_id_for_value "${mapper_output}" "${mapper_name}")"
+
+  local -a mapper_settings=(
+    -s "name=${mapper_name}"
+    -s protocol=openid-connect
+    -s protocolMapper=oidc-usermodel-attribute-mapper
+    -s "config.\"user.attribute\"=\"${attribute_name}\""
+    -s "config.\"claim.name\"=\"${claim_name}\""
+    -s "config.\"jsonType.label\"=\"${json_type}\""
+    -s 'config."id.token.claim"="false"'
+    -s 'config."access.token.claim"="true"'
+    -s 'config."userinfo.token.claim"="true"'
+    -s 'config."introspection.token.claim"="true"'
+    -s 'config."multivalued"="false"'
+    -s 'config."aggregate.attrs"="false"'
+  )
+
+  if [[ -z "${mapper_uuid}" ]]; then
+    kcadm_run create "client-scopes/${scope_uuid}/protocol-mappers/models" -r "${REALM}"       "${mapper_settings[@]}" >/dev/null
+    echo "[keycloak-iac] created identity mapper ${mapper_name}" >&2
+  else
+    kcadm_run update "client-scopes/${scope_uuid}/protocol-mappers/models/${mapper_uuid}" -r "${REALM}"       "${mapper_settings[@]}" >/dev/null
+    echo "[keycloak-iac] updated identity mapper ${mapper_name}" >&2
+  fi
+}
+
+ensure_identity_scope() {
+  local scope_uuid
+  scope_uuid="$(csv_lookup_id client-scopes name "${IDENTITY_SCOPE_NAME}")"
+
+  if [[ -z "${scope_uuid}" ]]; then
+    kcadm_run create client-scopes -r "${REALM}"       -s "name=${IDENTITY_SCOPE_NAME}"       -s protocol=openid-connect >/dev/null
+    scope_uuid="$(csv_lookup_id client-scopes name "${IDENTITY_SCOPE_NAME}")"
+    echo "[keycloak-iac] created identity scope ${IDENTITY_SCOPE_NAME}" >&2
+  else
+    kcadm_run update "client-scopes/${scope_uuid}" -r "${REALM}"       -s "name=${IDENTITY_SCOPE_NAME}"       -s protocol=openid-connect >/dev/null
+    echo "[keycloak-iac] updated identity scope ${IDENTITY_SCOPE_NAME}" >&2
+  fi
+
+  [[ -n "${scope_uuid}" ]] || {
+    echo "[keycloak-iac] failed to resolve identity scope ${IDENTITY_SCOPE_NAME}" >&2
+    return 1
+  }
+
+  ensure_user_attribute_mapper "${scope_uuid}" database_id database_id long
+  ensure_user_attribute_mapper "${scope_uuid}" account_type account_type String
+  ensure_user_attribute_mapper "${scope_uuid}" name name String
+  ensure_user_attribute_mapper "${scope_uuid}" photo_url photo_url String
+  ensure_user_attribute_mapper "${scope_uuid}" farm_id farm_id long
+  ensure_user_attribute_mapper "${scope_uuid}" enterprise_id enterprise_id long
+  ensure_user_attribute_mapper "${scope_uuid}" first_access first_access boolean
+
+  printf '%s' "${scope_uuid}"
+}
+
 attach_default_scope() {
   local client_uuid="$1"
   local scope_uuid="$2"
@@ -233,7 +298,7 @@ scope_name_for_audience() {
 
   for file in "${resource_files[@]}"; do
     client_type="$(config_get "${file}" CLIENT_TYPE)"
-    [[ "${client_type}" == microservice ]] || continue
+    [[ "${client_type}" == microservice || "${client_type}" == token-exchange ]] || continue
 
     client_id="$(config_get "${file}" CLIENT_ID)"
     audience="$(config_get "${file}" AUDIENCE "${client_id}")"
@@ -247,12 +312,71 @@ scope_name_for_audience() {
   return 1
 }
 
+is_managed_audience_scope_name() {
+  local expected_scope_name="$1"
+  local file client_type client_id scope_name
+
+  for file in "${resource_files[@]}"; do
+    client_type="$(config_get "${file}" CLIENT_TYPE)"
+    [[ "${client_type}" == microservice || "${client_type}" == token-exchange ]] || continue
+
+    client_id="$(config_get "${file}" CLIENT_ID)"
+    scope_name="$(config_get "${file}" SCOPE_NAME "${client_id}-audience")"
+    [[ "${scope_name}" == "${expected_scope_name}" ]] && return 0
+  done
+
+  return 1
+}
+
+scope_name_is_desired() {
+  local candidate_scope_name="$1"
+  local audiences="$2"
+  local audience desired_scope_name
+  local -a audience_items=()
+
+  [[ -n "${audiences}" ]] || return 1
+  IFS='|' read -r -a audience_items <<< "${audiences}"
+
+  for audience in "${audience_items[@]}"; do
+    if desired_scope_name="$(scope_name_for_audience "${audience}")" \
+      && [[ "${desired_scope_name}" == "${candidate_scope_name}" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+detach_stale_managed_audiences() {
+  local client_uuid="$1"
+  local client_id="$2"
+  local audiences="$3"
+  local output scope_uuid scope_name
+
+  output="$(kcadm_run get "clients/${client_uuid}/default-client-scopes" -r "${REALM}" \
+    --fields id,name --format csv --noquotes)"
+
+  while IFS=',' read -r scope_uuid scope_name; do
+    [[ "${scope_uuid}" == id ]] && continue
+    [[ -n "${scope_uuid}" && -n "${scope_name}" ]] || continue
+
+    if is_managed_audience_scope_name "${scope_name}" \
+      && ! scope_name_is_desired "${scope_name}" "${audiences}"; then
+      kcadm_run delete "clients/${client_uuid}/default-client-scopes/${scope_uuid}" \
+        -r "${REALM}" >/dev/null
+      echo "[keycloak-iac] detached stale managed audience scope ${scope_name} from ${client_id}"
+    fi
+  done <<< "${output}"
+}
+
 attach_managed_audiences() {
   local client_uuid="$1"
   local client_id="$2"
   local audiences="$3"
   local audience scope_name scope_uuid
   local -a audience_items=()
+
+  detach_stale_managed_audiences "${client_uuid}" "${client_id}" "${audiences}"
 
   [[ -n "${audiences}" ]] || return 0
 
@@ -317,8 +441,44 @@ reconcile_application() {
   echo "[keycloak-iac] reconciling ${client_type} client ${client_id}"
   client_uuid="$(upsert_base_client "${client_id}" true true "${redirect_json}" "${web_origins_json}" true false false)"
   attach_managed_audiences "${client_uuid}" "${client_id}" "${audiences}"
+  attach_default_scope "${client_uuid}" "${identity_scope_uuid}"
 
-  echo "[keycloak-iac] ${client_type} client ${client_id} ready with Authorization Code + PKCE S256"
+  echo "[keycloak-iac] ${client_type} client ${client_id} ready with Authorization Code + PKCE S256 and identity claims"
+}
+
+reconcile_token_exchange_audience() {
+  local file="$1"
+  local client_id audience scope_name mapper_name
+
+  client_id="$(config_get "${file}" CLIENT_ID)"
+  audience="$(config_get "${file}" AUDIENCE "${client_id}")"
+  scope_name="$(config_get "${file}" SCOPE_NAME "${client_id}-audience")"
+  mapper_name="$(config_get "${file}" MAPPER_NAME "${scope_name}")"
+
+  [[ -n "${client_id}" ]] || { echo "[keycloak-iac] CLIENT_ID missing in ${file}" >&2; return 1; }
+
+  ensure_audience_scope "${audience}" "${scope_name}" "${mapper_name}" >/dev/null
+  echo "[keycloak-iac] token-exchange requester audience ${audience} ready"
+}
+
+reconcile_token_exchange() {
+  local file="$1"
+  local client_id audiences client_uuid
+
+  client_id="$(config_get "${file}" CLIENT_ID)"
+  audiences="$(config_get "${file}" AUDIENCES)"
+
+  [[ -n "${client_id}" ]] || { echo "[keycloak-iac] CLIENT_ID missing in ${file}" >&2; return 1; }
+  [[ -n "${audiences}" ]] || { echo "[keycloak-iac] AUDIENCES missing for token-exchange client ${client_id}" >&2; return 1; }
+
+  echo "[keycloak-iac] reconciling token-exchange client ${client_id}"
+  client_uuid="$(upsert_base_client "${client_id}" false false '[]' '[]' false false false)"
+  kcadm_run update "clients/${client_uuid}" -r "${REALM}" \
+    -s 'attributes={"standard.token.exchange.enabled":"true"}' >/dev/null
+  attach_managed_audiences "${client_uuid}" "${client_id}" "${audiences}"
+  attach_default_scope "${client_uuid}" "${identity_scope_uuid}"
+
+  echo "[keycloak-iac] token-exchange client ${client_id} ready"
 }
 
 reconcile_service() {
@@ -337,7 +497,7 @@ reconcile_service() {
   echo "[keycloak-iac] service client ${client_id} ready for Client Credentials"
 }
 
-reconcile_password_broker() {
+reconcile_password_grant() {
   local file="$1"
   local client_id audiences client_uuid
 
@@ -346,10 +506,12 @@ reconcile_password_broker() {
 
   [[ -n "${client_id}" ]] || { echo "[keycloak-iac] CLIENT_ID missing in ${file}" >&2; return 1; }
 
-  echo "[keycloak-iac] reconciling password broker ${client_id}"
+  echo "[keycloak-iac] reconciling restricted password-grant client ${client_id}"
   client_uuid="$(upsert_base_client "${client_id}" false false '[]' '[]' false false true)"
   attach_managed_audiences "${client_uuid}" "${client_id}" "${audiences}"
-  echo "[keycloak-iac] password broker ${client_id} ready for password grant"
+  attach_default_scope "${client_uuid}" "${identity_scope_uuid}"
+
+  echo "[keycloak-iac] restricted password-grant client ${client_id} ready"
 }
 
 shopt -s nullglob
@@ -360,14 +522,17 @@ if (( ${#resource_files[@]} == 0 )); then
   exit 0
 fi
 
-# First create every resource server and its audience scope. Password brokers,
-# applications and service identities are reconciled afterwards so their
-# audience references are order-independent.
+identity_scope_uuid="$(ensure_identity_scope)"
+
+# First create every resource server and its audience scope. Applications and
+# service identities are reconciled afterwards so AUDIENCES references are
+# order-independent.
 for config_file in "${resource_files[@]}"; do
   client_type="$(config_get "${config_file}" CLIENT_TYPE)"
   case "${client_type}" in
     microservice) reconcile_microservice "${config_file}" ;;
-    mobile|web|service|password-broker) ;;
+    token-exchange) reconcile_token_exchange_audience "${config_file}" ;;
+    mobile|web|service|password-broker|password-grant) ;;
     *) echo "[keycloak-iac] unsupported CLIENT_TYPE '${client_type}' in ${config_file}" >&2; exit 1 ;;
   esac
 done
@@ -377,6 +542,7 @@ for config_file in "${resource_files[@]}"; do
   case "${client_type}" in
     mobile|web) reconcile_application "${config_file}" ;;
     service) reconcile_service "${config_file}" ;;
-    password-broker) reconcile_password_broker "${config_file}" ;;
+    token-exchange) reconcile_token_exchange "${config_file}" ;;
+    password-broker|password-grant) reconcile_password_grant "${config_file}" ;;
   esac
 done

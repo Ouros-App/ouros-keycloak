@@ -1,9 +1,12 @@
+# The provider JAR is compiled by CI before the Discloud upload. Keeping this
+# Dockerfile based solely on Keycloak stages matches Discloud's Docker validator.
 FROM quay.io/keycloak/keycloak:26.7.3 AS builder
 
 ENV KC_DB=postgres
 ENV KC_HEALTH_ENABLED=true
 ENV KC_METRICS_ENABLED=true
 
+COPY --chown=1000:0 providers/ouros-user-storage/target/ouros-user-storage-1.0.0.jar /opt/keycloak/providers/ouros-user-storage.jar
 RUN /opt/keycloak/bin/kc.sh build
 
 FROM quay.io/keycloak/keycloak:26.7.3

@@ -127,8 +127,8 @@ validate_group() {
     scope_name="$(config_get "${file}" SCOPE_NAME)"
     mapper_name="$(config_get "${file}" MAPPER_NAME)"
 
-    [[ "${client_type}" =~ ^(microservice|mobile|web|service|password-broker)$ ]] \
-      || fail "${file}: CLIENT_TYPE must be microservice, mobile, web, service or password-broker"
+    [[ "${client_type}" =~ ^(microservice|mobile|web|service|token-exchange|password-broker|password-grant)$ ]] \
+      || fail "${file}: CLIENT_TYPE must be microservice, mobile, web, service, token-exchange, password-broker or password-grant"
     client_types_seen["${client_type}"]=1
 
     [[ "${client_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || fail "${file}: invalid CLIENT_ID '${client_id}'"
@@ -165,25 +165,32 @@ validate_group() {
         [[ -z "${scope_name}" && -z "${mapper_name}" && "$(config_get "${file}" AUDIENCE)" == "" ]] \
           || fail "${file}: web clients cannot declare AUDIENCE, SCOPE_NAME or MAPPER_NAME"
         ;;
-      service)
+      token-exchange)
         [[ -z "${redirect_uris}" && -z "${web_origins}" ]] \
-          || fail "${file}: service clients cannot declare REDIRECT_URIS or WEB_ORIGINS"
-        [[ -z "${scope_name}" && -z "${mapper_name}" && "$(config_get "${file}" AUDIENCE)" == "" ]] \
-          || fail "${file}: service clients cannot declare AUDIENCE, SCOPE_NAME or MAPPER_NAME"
+          || fail "${file}: token-exchange clients cannot declare REDIRECT_URIS or WEB_ORIGINS"
+        [[ -n "${audiences}" ]] \
+          || fail "${file}: token-exchange clients require target AUDIENCES"
+        [[ "${audience}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] \
+          || fail "${file}: invalid token-exchange AUDIENCE '${audience}'"
+        [[ -n "${scope_name}" ]] || scope_name="${client_id}-audience"
+        [[ -n "${mapper_name}" ]] || mapper_name="${scope_name}"
+        [[ -z "${managed_audiences[${audience}]:-}" ]] || fail "${label}: duplicate AUDIENCE ${audience}"
+        [[ -z "${scope_names[${scope_name}]:-}" ]] || fail "${label}: duplicate SCOPE_NAME ${scope_name}"
+        managed_audiences["${audience}"]="${file}"
+        scope_names["${scope_name}"]="${file}"
         ;;
-      password-broker)
+      service|password-broker|password-grant)
         [[ -z "${redirect_uris}" && -z "${web_origins}" ]] \
-          || fail "${file}: password-broker clients cannot declare REDIRECT_URIS or WEB_ORIGINS"
+          || fail "${file}: service/password-grant clients cannot declare REDIRECT_URIS or WEB_ORIGINS"
         [[ -z "${scope_name}" && -z "${mapper_name}" && "$(config_get "${file}" AUDIENCE)" == "" ]] \
-          || fail "${file}: password-broker clients cannot declare AUDIENCE, SCOPE_NAME or MAPPER_NAME"
-        [[ -n "${audiences}" ]] || fail "${file}: password-broker clients require AUDIENCES"
+          || fail "${file}: service/password-grant clients cannot declare AUDIENCE, SCOPE_NAME or MAPPER_NAME"
         ;;
     esac
   done
 
   for file in "${files[@]}"; do
     client_type="$(config_get "${file}" CLIENT_TYPE)"
-    [[ "${client_type}" == mobile || "${client_type}" == web || "${client_type}" == service || "${client_type}" == password-broker ]] || continue
+    [[ "${client_type}" == mobile || "${client_type}" == web || "${client_type}" == service || "${client_type}" == token-exchange || "${client_type}" == password-broker || "${client_type}" == password-grant ]] || continue
 
     audiences="$(config_get "${file}" AUDIENCES)"
     [[ -n "${audiences}" ]] || continue
@@ -196,7 +203,7 @@ validate_group() {
   done
 
   if [[ "${require_all_types}" == true ]]; then
-    for required_type in microservice mobile web service password-broker; do
+    for required_type in microservice mobile web service; do
       [[ -n "${client_types_seen[${required_type}]:-}" ]] \
         || fail "${label}: missing ${required_type} client coverage"
     done
@@ -206,8 +213,16 @@ validate_group() {
 }
 
 command -v jq >/dev/null 2>&1 || fail "jq is required"
-jq -e '.realm == "ouros" and .enabled == true' realm/ouros-realm.json >/dev/null \
-  || fail "realm/ouros-realm.json must define the enabled ouros realm"
+jq -e '
+  .realm == "ouros"
+  and .enabled == true
+  and .sslRequired == "external"
+  and .registrationAllowed == false
+  and .resetPasswordAllowed == false
+  and .verifyEmail == false
+  and .bruteForceProtected == true
+' realm/ouros-realm.json >/dev/null \
+  || fail "realm/ouros-realm.json must define the hardened ouros realm"
 
 grep -qx 'TYPE=site' discloud.config || fail "discloud.config must use TYPE=site"
 grep -qx 'MAIN=Dockerfile' discloud.config || fail "discloud.config must use MAIN=Dockerfile"
@@ -216,7 +231,111 @@ grep -qx 'VLAN=true' discloud.config || fail "discloud.config must keep VLAN=tru
 
 grep -q 'keycloak-entrypoint.sh' Dockerfile || fail "Dockerfile must run the IaC-aware entrypoint"
 
+validate_first_party_broker_contract() {
+  local broker_file="iac/resources/ms-auth-service-broker.conf"
+  local actual expected actual_sorted expected_sorted
+  expected="ms-spring-api|ms-telemetry-dashboard-service|ms-ai-server|ms-ai-server-mcp-exchange|ms-mcp-server-ouros-knowledge-codemode|ms-ouros-audience-engine"
+
+  [[ -f "${broker_file}" ]] || fail "${broker_file}: official first-party broker declaration is required"
+  [[ "$(config_get "${broker_file}" CLIENT_TYPE)" == "password-broker" ]] \
+    || fail "${broker_file}: CLIENT_TYPE must remain password-broker"
+  [[ "$(config_get "${broker_file}" CLIENT_ID)" == "ms-auth-service-broker" ]] \
+    || fail "${broker_file}: CLIENT_ID must remain ms-auth-service-broker"
+
+  actual="$(config_get "${broker_file}" AUDIENCES)"
+  actual_sorted="$(tr '|' '\n' <<< "${actual}" | sed '/^$/d' | sort -u | paste -sd'|' -)"
+  expected_sorted="$(tr '|' '\n' <<< "${expected}" | sort -u | paste -sd'|' -)"
+  [[ "${actual_sorted}" == "${expected_sorted}" ]] \
+    || fail "${broker_file}: AUDIENCES must contain the complete Phase 3 first-party resource-server set"
+}
+
+
+validate_debug_console_contract() {
+  local debug_file="iac/resources/ms-ai-server-debug.conf"
+  local actual expected actual_sorted expected_sorted
+  expected="ms-ai-server|ms-ai-server-mcp-exchange"
+
+  [[ -f "${debug_file}" ]] || fail "${debug_file}: official debug client declaration is required"
+  [[ "$(config_get "${debug_file}" CLIENT_TYPE)" == "password-grant" ]] \
+    || fail "${debug_file}: CLIENT_TYPE must remain password-grant"
+  [[ "$(config_get "${debug_file}" CLIENT_ID)" == "ms-ai-server-debug" ]] \
+    || fail "${debug_file}: CLIENT_ID must remain ms-ai-server-debug"
+
+  actual="$(config_get "${debug_file}" AUDIENCES)"
+  actual_sorted="$(tr '|' '\n' <<< "${actual}" | sed '/^$/d' | sort -u | paste -sd'|' -)"
+  expected_sorted="$(tr '|' '\n' <<< "${expected}" | sort -u | paste -sd'|' -)"
+  [[ "${actual_sorted}" == "${expected_sorted}" ]] \
+    || fail "${debug_file}: AUDIENCES must allow the AI Server and its standard MCP resource"
+}
+
+validate_mobile_client_contract() {
+  local mobile_file="iac/resources/ouros-mobile.conf"
+  local actual expected actual_sorted expected_sorted redirects
+
+  expected="ms-spring-api|ms-ai-server|ms-telemetry-dashboard-service|ms-ai-server-mcp-exchange"
+
+  [[ -f "${mobile_file}" ]] || fail "${mobile_file}: official mobile client declaration is required"
+  [[ "$(config_get "${mobile_file}" CLIENT_TYPE)" == "mobile" ]] \
+    || fail "${mobile_file}: CLIENT_TYPE must remain mobile"
+  [[ "$(config_get "${mobile_file}" CLIENT_ID)" == "ouros-mobile" ]] \
+    || fail "${mobile_file}: CLIENT_ID must remain ouros-mobile"
+
+  redirects="$(config_get "${mobile_file}" REDIRECT_URIS)"
+  [[ "|${redirects}|" == *"|com.ourosapp.ourosandroidapp:/oauth2redirect|"* ]] \
+    || fail "${mobile_file}: exact Android redirect URI is required"
+  [[ "|${redirects}|" == *"|http://127.0.0.1:8765/callback|"* ]] \
+    || fail "${mobile_file}: exact E2E loopback redirect URI is required"
+
+  actual="$(config_get "${mobile_file}" AUDIENCES)"
+  actual_sorted="$(tr '|' '\n' <<< "${actual}" | sed '/^$/d' | sort -u | paste -sd'|' -)"
+  expected_sorted="$(tr '|' '\n' <<< "${expected}" | sort -u | paste -sd'|' -)"
+  [[ "${actual_sorted}" == "${expected_sorted}" ]] \
+    || fail "${mobile_file}: AUDIENCES must contain the complete mobile surface plus the confidential exchange requester"
+}
+
+validate_token_exchange_contract() {
+  local exchange_file="iac/resources/ms-ai-server-mcp-exchange.conf"
+  local actual expected actual_sorted expected_sorted
+  expected="ms-mcp-server-ouros-knowledge|ms-telemetry-dashboard-service"
+
+  [[ -f "${exchange_file}" ]] || fail "${exchange_file}: official Midas token-exchange client is required"
+  [[ "$(config_get "${exchange_file}" CLIENT_TYPE)" == "token-exchange" ]] \
+    || fail "${exchange_file}: CLIENT_TYPE must remain token-exchange"
+  [[ "$(config_get "${exchange_file}" CLIENT_ID)" == "ms-ai-server-mcp-exchange" ]] \
+    || fail "${exchange_file}: CLIENT_ID must remain ms-ai-server-mcp-exchange"
+  [[ "$(config_get "${exchange_file}" AUDIENCE)" == "ms-ai-server-mcp-exchange" ]] \
+    || fail "${exchange_file}: requester audience must remain ms-ai-server-mcp-exchange"
+  actual="$(config_get "${exchange_file}" AUDIENCES)"
+  actual_sorted="$(tr '|' '\n' <<< "${actual}" | sed '/^$/d' | sort -u | paste -sd'|' -)"
+  expected_sorted="$(tr '|' '\n' <<< "${expected}" | sort -u | paste -sd'|' -)"
+  [[ "${actual_sorted}" == "${expected_sorted}" ]] \
+    || fail "${exchange_file}: target audiences must include Knowledge MCP and Telemetry"
+}
+
+validate_prometheus_client_contract() {
+  local prometheus_file="iac/resources/ouros-prometheus.conf"
+  local actual expected actual_sorted expected_sorted
+  expected="ms-ai-server|ms-spring-api|ms-mcp-server-ouros-knowledge|ms-telemetry-dashboard-service|ms-auth-service"
+
+  [[ -f "${prometheus_file}" ]] || fail "${prometheus_file}: Prometheus service declaration is required"
+  [[ "$(config_get "${prometheus_file}" CLIENT_TYPE)" == "service" ]] \
+    || fail "${prometheus_file}: CLIENT_TYPE must remain service"
+  [[ "$(config_get "${prometheus_file}" CLIENT_ID)" == "ouros-prometheus" ]] \
+    || fail "${prometheus_file}: CLIENT_ID must remain ouros-prometheus"
+
+  actual="$(config_get "${prometheus_file}" AUDIENCES)"
+  actual_sorted="$(tr '|' '\n' <<< "${actual}" | sed '/^$/d' | sort -u | paste -sd'|' -)"
+  expected_sorted="$(tr '|' '\n' <<< "${expected}" | sort -u | paste -sd'|' -)"
+  [[ "${actual_sorted}" == "${expected_sorted}" ]] \
+    || fail "${prometheus_file}: AUDIENCES must contain the complete Prometheus scrape surface"
+}
+
 validate_group iac/resources '*.conf' production false
+validate_token_exchange_contract
+validate_first_party_broker_contract
+validate_debug_console_contract
+validate_mobile_client_contract
+validate_prometheus_client_contract
 validate_group iac/examples '*.conf.example' examples true
 validate_group iac/test-fixtures '*.conf' test-fixtures true
 

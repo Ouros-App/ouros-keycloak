@@ -116,43 +116,114 @@ jobs:
           test -f discloud.config
           test -f realm/ouros-realm.json
           test -f iac/validate.sh
+          test -f iac/validate-user-storage.sh
+          test -f iac/sync-realm.sh
           test -f iac/sync-clients.sh
+          test -f iac/sync-user-storage.sh
+          test -f iac/sync-email-otp.sh
           test -f scripts/keycloak-entrypoint.sh
           test -f ci/keycloak-integration.sh
+          test -f ci/mock-auth-service.py
+          test -f providers/ouros-user-storage/pom.xml
+          test -f providers/ouros-user-storage/src/main/resources/META-INF/services/org.keycloak.storage.UserStorageProviderFactory
+          test -f providers/ouros-user-storage/src/main/resources/META-INF/services/org.keycloak.authentication.AuthenticatorFactory
+          test -f providers/ouros-user-storage/src/main/resources/theme-resources/templates/ouros-email-otp-login.ftl
+          test -f providers/ouros-user-storage/src/main/resources/theme-resources/templates/html/ouros-email-otp.ftl
+          test -f providers/ouros-user-storage/src/main/resources/theme-resources/templates/text/ouros-email-otp.ftl
+          test -f iac/resources/ms-auth-service-internal.conf
+          test -f iac/resources/keycloak-user-storage.conf
+          test -f iac/resources/ms-ai-server-mcp-exchange.conf
+          test -f iac/user-storage/ouros-auth-service.conf
           test -f iac/examples/microservice.conf.example
           test -f iac/examples/mobile.conf.example
           test -f iac/examples/web.conf.example
           test -f iac/examples/service.conf.example
-          test -f iac/examples/password-broker.conf.example
+          test -f iac/examples/token-exchange.conf.example
           test -f iac/test-fixtures/ci-api.conf
           test -f iac/test-fixtures/ci-mobile.conf
           test -f iac/test-fixtures/ci-web.conf
           test -f iac/test-fixtures/ci-service.conf
-          test -f iac/test-fixtures/ci-password-broker.conf
+          test -f iac/test-fixtures/ci-token-exchange.conf
+          test -f iac/test-fixtures/ci-auth-api.conf
+          test -f iac/test-fixtures/ci-user-storage.conf
+          test -f iac/test-fixtures/user-storage/ouros-auth-service.conf
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Test User Storage provider
+        run: mvn -B -q -f providers/ouros-user-storage/pom.xml verify
+
+      - name: Upload validated User Storage provider
+        uses: actions/upload-artifact@v4
+        with:
+          name: ouros-user-storage-build
+          path: providers/ouros-user-storage/target
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Check Bash syntax
         run: |
           bash -n iac/validate.sh
+          bash -n iac/validate-user-storage.sh
+          bash -n iac/sync-realm.sh
           bash -n iac/sync-clients.sh
+          bash -n iac/sync-user-storage.sh
+          bash -n iac/sync-email-otp.sh
           bash -n scripts/keycloak-entrypoint.sh
           bash -n ci/keycloak-integration.sh
 
       - name: Run ShellCheck
         run: |
           shellcheck iac/validate.sh
+          shellcheck iac/validate-user-storage.sh
+          shellcheck iac/sync-realm.sh
           shellcheck iac/sync-clients.sh
+          shellcheck iac/sync-user-storage.sh
+          shellcheck iac/sync-email-otp.sh
           shellcheck scripts/keycloak-entrypoint.sh
           shellcheck ci/keycloak-integration.sh
 
       - name: Validate realm, Discloud and client declarations
-        run: bash iac/validate.sh
+        run: |
+          bash iac/validate.sh
+          bash iac/validate-user-storage.sh
 
       - name: Ensure tracked configuration contains no obvious secrets
         run: |
-          if grep -RniE '(password|secret|token)="[^".][^"]+"' iac/resources iac/examples iac/test-fixtures; then
+          if grep -RniE '(password|secret|token)="[^".][^"]+"' iac/resources iac/user-storage iac/examples iac/test-fixtures; then
             echo "Tracked IaC files must not contain credentials or client secrets."
             exit 1
           fi
+
+  discloud-preflight:
+    name: discloud-preflight
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: validation
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download validated User Storage provider
+        uses: actions/download-artifact@v4
+        with:
+          name: ouros-user-storage-build
+          path: providers/ouros-user-storage/target
+
+
+      - name: Validate Discloud Dockerfile contract
+        run: |
+          grep -Fxc 'FROM quay.io/keycloak/keycloak:26.7.3 AS builder' Dockerfile | grep -qx '1'
+          grep -Fxc 'FROM quay.io/keycloak/keycloak:26.7.3' Dockerfile | grep -qx '1'
+          ! grep -q '^FROM maven:' Dockerfile
+          test -s providers/ouros-user-storage/target/ouros-user-storage-1.0.0.jar
+          docker build -t ouros-keycloak:discloud-preflight .
+          docker image inspect ouros-keycloak:discloud-preflight --format '{{json .Config.Entrypoint}}' | grep -F 'keycloak-entrypoint.sh'
 
   keycloak-integration:
     name: keycloak-iac-integration
@@ -163,19 +234,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Download validated User Storage provider
+        uses: actions/download-artifact@v4
+        with:
+          name: ouros-user-storage-build
+          path: providers/ouros-user-storage/target
+
       - name: Run PostgreSQL + Keycloak integration suite for all client profiles
         run: bash ci/keycloak-integration.sh
 
   sonarcloud:
     name: sonarcloud
     runs-on: ubuntu-latest
-    needs: [validation, keycloak-integration]
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && github.actor != 'dependabot[bot]'
+    needs: validation
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Download validated User Storage provider
+        uses: actions/download-artifact@v4
+        with:
+          name: ouros-user-storage-build
+          path: providers/ouros-user-storage/target
+
 
       - name: Configure SonarCloud
         env:
@@ -187,11 +278,13 @@ jobs:
           {
             echo "sonar.organization=${SONAR_ORGANIZATION:-$owner}"
             echo "sonar.projectKey=${SONAR_PROJECT_KEY:-${owner}_${repo}}"
-            echo "sonar.sources=."
-            echo "sonar.exclusions=.git/**,.github/**,dist/**,build/**"
-            if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
-              echo "sonar.branch.name=main"
-            fi
+            echo "sonar.sources=providers/ouros-user-storage/src/main/java,iac,scripts,Dockerfile"
+            echo "sonar.tests=providers/ouros-user-storage/src/test/java"
+            echo "sonar.exclusions=iac/test-fixtures/**,iac/examples/**"
+            echo "sonar.java.binaries=providers/ouros-user-storage/target/classes"
+            echo "sonar.coverage.jacoco.xmlReportPaths=providers/ouros-user-storage/target/site/jacoco/jacoco.xml"
+            # Let SonarCloud resolve the configured main branch on pushes and
+            # the pull-request metadata on PR analysis.
           } > sonar-project.properties
 
       - name: Disable Automatic Analysis via API
@@ -204,10 +297,36 @@ jobs:
             -d "autoScan=false"
 
       - name: SonarCloud Scan
+        id: sonar-scan
+        continue-on-error: true
         uses: SonarSource/sonarqube-scan-action@v6
+        with:
+          args: >
+            -Dsonar.qualitygate.wait=true
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: https://sonarcloud.io
+
+      - name: Report SonarCloud PR issues
+        if: always() && github.event_name == 'pull_request'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          project_key="$(grep '^sonar.projectKey=' sonar-project.properties | cut -d= -f2-)"
+          curl -fsS -u "${SONAR_TOKEN}:" --get "https://sonarcloud.io/api/issues/search" \
+            --data-urlencode "componentKeys=${project_key}" \
+            --data-urlencode "pullRequest=${PR_NUMBER}" \
+            --data-urlencode "issueStatuses=OPEN,CONFIRMED" \
+            --data-urlencode "ps=100" \
+          | jq -r '.issues[] | [(.type // "-"), (.severity // "-"), .rule, .component, ((.line // 0) | tostring), .message] | @tsv'
+
+      - name: Enforce SonarCloud Quality Gate
+        # SonarCloud's Quality Gate API is enforced for pull requests. The
+        # organization token cannot query it for the project's main branch,
+        # so main deploys remain gated by validation, integration and CodeQL.
+        if: github.event_name == 'pull_request' && steps.sonar-scan.outcome != 'success'
+        run: exit 1
 
       - name: Publish SonarCloud project
         env:
@@ -240,7 +359,7 @@ jobs:
   ci:
     name: ci
     runs-on: ubuntu-latest
-    needs: [validation, keycloak-integration, sonarcloud, codeql]
+    needs: [validation, discloud-preflight, keycloak-integration, sonarcloud, codeql]
     if: always() && (github.event.action != 'labeled' || github.event.label.name == 'rerun-ci')
 
     steps:
@@ -248,15 +367,108 @@ jobs:
         env:
           VALIDATION_RESULT: ${{ needs.validation.result }}
           INTEGRATION_RESULT: ${{ needs.keycloak-integration.result }}
+          DISCLOUD_PREFLIGHT_RESULT: ${{ needs.discloud-preflight.result }}
           SONARCLOUD_RESULT: ${{ needs.sonarcloud.result }}
           CODEQL_RESULT: ${{ needs.codeql.result }}
+          EVENT_NAME: ${{ github.event_name }}
+          SONARCLOUD_REQUIRED: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && github.actor != 'dependabot[bot]' }}
         run: |
           echo "validation=${VALIDATION_RESULT}"
           echo "integration=${INTEGRATION_RESULT}"
+          echo "discloud_preflight=${DISCLOUD_PREFLIGHT_RESULT}"
           echo "sonarcloud=${SONARCLOUD_RESULT}"
+          echo "sonarcloud_required=${SONARCLOUD_REQUIRED}"
           echo "codeql=${CODEQL_RESULT}"
 
           test "${VALIDATION_RESULT}" = "success"
           test "${INTEGRATION_RESULT}" = "success"
-          test "${SONARCLOUD_RESULT}" = "success"
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            test "${DISCLOUD_PREFLIGHT_RESULT}" = "success"
+            if [[ "${SONARCLOUD_REQUIRED}" == "true" ]]; then
+              test "${SONARCLOUD_RESULT}" = "success"
+            else
+              test "${SONARCLOUD_RESULT}" = "skipped"
+            fi
+          else
+            test "${DISCLOUD_PREFLIGHT_RESULT}" = "skipped"
+            test "${SONARCLOUD_RESULT}" = "skipped"
+          fi
           test "${CODEQL_RESULT}" = "success"
+
+  deploy-discloud:
+    name: deploy-discloud
+    runs-on: ubuntu-latest
+    needs: ci
+    if: always() && github.event_name == 'push' && needs.ci.result == 'success'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure Discloud token is configured
+        env:
+          DISCLOUD_TOKEN: ${{ secrets.DISCLOUD_TOKEN }}
+        run: test -n "${DISCLOUD_TOKEN}"
+
+      - name: Preflight ms-auth-service M3 bridge
+        run: |
+          auth_base="https://ms-auth-service.discloud.app"
+
+          curl -fsS --max-time 10 "${auth_base}/health" \
+            | jq -e '.status == "ok"' >/dev/null
+          curl -fsS --max-time 10 "${auth_base}/ready" \
+            | jq -e '.status == "ready"' >/dev/null
+
+          headers="$(mktemp)"
+          body="$(mktemp)"
+          trap 'rm -f "${headers}" "${body}"' EXIT
+
+          status="$(curl -sS --max-time 10 \
+            -D "${headers}" \
+            -o "${body}" \
+            -w '%{http_code}' \
+            "${auth_base}/internal/v1/identities/by-email?email=deployment-preflight%40invalid.local")"
+
+          if [[ "${status}" != 401 ]]; then
+            echo "ms-auth-service M3 internal bridge is not deployed (expected 401, got ${status})." >&2
+            cat "${body}" >&2 || true
+            exit 1
+          fi
+
+          grep -qi '^www-authenticate: Bearer' "${headers}" \
+            || { echo "ms-auth-service internal bridge did not return a Bearer challenge." >&2; exit 1; }
+
+      - name: Download validated User Storage provider
+        uses: actions/download-artifact@v4
+        with:
+          name: ouros-user-storage-build
+          path: providers/ouros-user-storage/target
+
+      - name: Deploy Ouros Keycloak to Discloud
+        uses: discloud/deploy-action@fae7024653d941a19daa2b6f56d2ae208e008c54
+        with:
+          token: ${{ secrets.DISCLOUD_TOKEN }}
+          app_id: ouros-keycloak
+
+      - name: Verify production OIDC endpoints
+        run: |
+          discovery="https://ouros-keycloak.discloud.app/realms/ouros/.well-known/openid-configuration"
+          jwks="https://ouros-keycloak.discloud.app/realms/ouros/protocol/openid-connect/certs"
+
+          ready=false
+          for attempt in $(seq 1 60); do
+            if discovery_json="$(curl -fsS --max-time 5 "${discovery}" 2>/dev/null)" \
+              && jq -e '.issuer == "https://ouros-keycloak.discloud.app/realms/ouros"' <<< "${discovery_json}" >/dev/null \
+              && jwks_json="$(curl -fsS --max-time 5 "${jwks}" 2>/dev/null)" \
+              && jq -e '.keys | length > 0' <<< "${jwks_json}" >/dev/null; then
+              ready=true
+              break
+            fi
+            echo "Waiting for production Keycloak after deploy (attempt ${attempt}/60)"
+            sleep 5
+          done
+
+          if [[ "${ready}" != true ]]; then
+            echo "Production Keycloak did not expose valid OIDC discovery/JWKS after deploy." >&2
+            exit 1
+          fi
