@@ -234,9 +234,9 @@ A CI valida:
 - ausência de secrets versionados;
 - build real do Dockerfile;
 - integração PostgreSQL + Keycloak;
-- reconciliação dos tipos `microservice`, `mobile`, `web` e `service`;
-- PKCE S256, redirect URIs, web origins e audience scopes;
-- fluxo real `client_credentials` e audience do token de `service`;
+- A reconciliação valida os clientes `microservice`, `mobile`, `web`, `service` e `password-broker`;
+- PKCE S256, redirect URIs, web origins e scopes de audience gerenciados;
+- tokens reais via `client_credentials` e password grant com as audiences configuradas;
 - idempotência da reconciliação;
 - disponibilidade do JWKS;
 - SonarCloud e CodeQL.
@@ -259,17 +259,21 @@ A CI valida:
     ├── validate.sh
     ├── sync-clients.sh
     ├── resources/
+    │   ├── ms-auth-service-broker.conf
+    │   ├── ms-ouros-audience-engine.conf
     │   └── ms-telemetry-dashboard-service.conf
     ├── examples/
     │   ├── microservice.conf.example
     │   ├── mobile.conf.example
     │   ├── web.conf.example
-    │   └── service.conf.example
+    │   ├── service.conf.example
+    │   └── password-broker.conf.example
     └── test-fixtures/
         ├── ci-api.conf
         ├── ci-mobile.conf
         ├── ci-web.conf
-        └── ci-service.conf
+        ├── ci-service.conf
+        └── ci-password-broker.conf
 ```
 
 ## Segurança
@@ -279,7 +283,7 @@ A CI valida:
 - acessos públicos ao Keycloak usam HTTPS;
 - mobile e web são public clients com PKCE, sem client secret;
 - services são confidential clients, com secret gerado pelo Keycloak e service account habilitada;
-- Direct Access Grants e Implicit Flow permanecem desativados;
+- Direct Access Grants habilitado somente para o `password-broker` confidencial dedicado; Implicit Flow continua desabilitado;
 - a sessão administrativa do `kcadm` fica apenas em `/tmp/keycloak-iac`;
 - `client_credentials` representa identidade de serviço e nunca identidade de usuário;
 - IDs de usuário usados pelas APIs devem vir do `sub` de um JWT de usuário validado.

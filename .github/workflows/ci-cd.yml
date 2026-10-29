@@ -123,10 +123,12 @@ jobs:
           test -f iac/examples/mobile.conf.example
           test -f iac/examples/web.conf.example
           test -f iac/examples/service.conf.example
+          test -f iac/examples/password-broker.conf.example
           test -f iac/test-fixtures/ci-api.conf
           test -f iac/test-fixtures/ci-mobile.conf
           test -f iac/test-fixtures/ci-web.conf
           test -f iac/test-fixtures/ci-service.conf
+          test -f iac/test-fixtures/ci-password-broker.conf
 
       - name: Check Bash syntax
         run: |

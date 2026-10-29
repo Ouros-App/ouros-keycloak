@@ -127,8 +127,8 @@ validate_group() {
     scope_name="$(config_get "${file}" SCOPE_NAME)"
     mapper_name="$(config_get "${file}" MAPPER_NAME)"
 
-    [[ "${client_type}" =~ ^(microservice|mobile|web|service)$ ]] \
-      || fail "${file}: CLIENT_TYPE must be microservice, mobile, web or service"
+    [[ "${client_type}" =~ ^(microservice|mobile|web|service|password-broker)$ ]] \
+      || fail "${file}: CLIENT_TYPE must be microservice, mobile, web, service or password-broker"
     client_types_seen["${client_type}"]=1
 
     [[ "${client_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || fail "${file}: invalid CLIENT_ID '${client_id}'"
@@ -171,12 +171,19 @@ validate_group() {
         [[ -z "${scope_name}" && -z "${mapper_name}" && "$(config_get "${file}" AUDIENCE)" == "" ]] \
           || fail "${file}: service clients cannot declare AUDIENCE, SCOPE_NAME or MAPPER_NAME"
         ;;
+      password-broker)
+        [[ -z "${redirect_uris}" && -z "${web_origins}" ]] \
+          || fail "${file}: password-broker clients cannot declare REDIRECT_URIS or WEB_ORIGINS"
+        [[ -z "${scope_name}" && -z "${mapper_name}" && "$(config_get "${file}" AUDIENCE)" == "" ]] \
+          || fail "${file}: password-broker clients cannot declare AUDIENCE, SCOPE_NAME or MAPPER_NAME"
+        [[ -n "${audiences}" ]] || fail "${file}: password-broker clients require AUDIENCES"
+        ;;
     esac
   done
 
   for file in "${files[@]}"; do
     client_type="$(config_get "${file}" CLIENT_TYPE)"
-    [[ "${client_type}" == mobile || "${client_type}" == web || "${client_type}" == service ]] || continue
+    [[ "${client_type}" == mobile || "${client_type}" == web || "${client_type}" == service || "${client_type}" == password-broker ]] || continue
 
     audiences="$(config_get "${file}" AUDIENCES)"
     [[ -n "${audiences}" ]] || continue
@@ -189,7 +196,7 @@ validate_group() {
   done
 
   if [[ "${require_all_types}" == true ]]; then
-    for required_type in microservice mobile web service; do
+    for required_type in microservice mobile web service password-broker; do
       [[ -n "${client_types_seen[${required_type}]:-}" ]] \
         || fail "${label}: missing ${required_type} client coverage"
     done

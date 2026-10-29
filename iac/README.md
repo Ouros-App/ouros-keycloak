@@ -79,6 +79,22 @@ CLIENT_ID="ouros-worker"
 AUDIENCES="ms-example-api|ms-another-api"
 ```
 
+### `password-broker`
+
+Representa o cliente confidencial de login de usuário usado pelo `ms-auth-service`.
+
+- autenticação do cliente por `client-secret`;
+- Direct Access Grants habilitado somente para esse tipo de cliente;
+- Standard Flow, Implicit Flow e service accounts desabilitados;
+- pode receber audiences de microserviços gerenciados;
+- o segredo não vai para o Git; salve-o apenas no gerenciador de segredos do serviço.
+
+```bash
+CLIENT_TYPE="password-broker"
+CLIENT_ID="ms-auth-service-broker"
+AUDIENCES="ms-ouros-audience-engine"
+```
+
 Valores múltiplos usam `|` como separador. Não use `*` em `WEB_ORIGINS`; mantenha as origens explícitas.
 
 ## Fluxo para adicionar um client
@@ -93,7 +109,7 @@ Uma mudança de client passa portanto pelo mesmo fluxo de revisão de código da
 
 ## Audiences
 
-`AUDIENCES` de clients `mobile`, `web` e `service` só pode referenciar audiences declaradas por clients `microservice` no mesmo diretório gerenciado. O reconciliador primeiro cria todos os resource servers e scopes e só depois configura os clients consumidores, então a ordem dos arquivos não importa.
+`AUDIENCES` de clientes `mobile`, `web`, `service` e `password-broker` só podem apontar para audiences declaradas por clientes `microservice` no mesmo diretório gerenciado. O reconciliador cria primeiro todos os resource servers e scopes e só depois configura os clientes consumidores, independentemente da ordem dos arquivos.
 
 Exemplo:
 
@@ -106,7 +122,7 @@ SCOPE_NAME="ms-telemetry-dashboard-audience"
 MAPPER_NAME="ms-telemetry-dashboard-audience"
 ```
 
-Um mobile, web ou service client que declare:
+Clientes `mobile`, `web`, `service` ou `password-broker` que declarem:
 
 ```bash
 AUDIENCES="ms-telemetry-dashboard-service"
@@ -151,4 +167,4 @@ bash iac/validate.sh
 shellcheck iac/*.sh scripts/*.sh ci/*.sh
 ```
 
-Os testes de integração da CI sobem PostgreSQL + Keycloak e validam os quatro tipos de client usando `iac/test-fixtures/`, incluindo um token real via Client Credentials para o tipo `service`.
+Os testes de integração da CI sobem PostgreSQL + Keycloak, validam os cinco tipos de cliente com `iac/test-fixtures/` e obtêm tokens reais via Client Credentials e password grant.

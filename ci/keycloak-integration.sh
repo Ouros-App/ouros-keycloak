@@ -141,20 +141,28 @@ kcadm_get() {
     /opt/keycloak/bin/kcadm.sh get "$@"
 }
 
+kcadm_run() {
+  docker exec -e HOME=/tmp/ci-verify "${KEYCLOAK_CONTAINER}" \
+    /opt/keycloak/bin/kcadm.sh "$@"
+}
+
 api_json="$(kcadm_get clients -r ouros -q clientId=ci-api)"
 mobile_json="$(kcadm_get clients -r ouros -q clientId=ci-mobile)"
 web_json="$(kcadm_get clients -r ouros -q clientId=ci-web)"
 service_json="$(kcadm_get clients -r ouros -q clientId=ci-service)"
+broker_json="$(kcadm_get clients -r ouros -q clientId=ci-password-broker)"
 
 jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == false and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == false' <<< "${api_json}" >/dev/null
 jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == true and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == false and .[0].attributes["pkce.code.challenge.method"] == "S256" and (.[0].redirectUris | index("com.ouros.ci:/oauth2redirect") != null)' <<< "${mobile_json}" >/dev/null
 jq -e 'length == 1 and .[0].publicClient == true and .[0].standardFlowEnabled == true and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == false and .[0].attributes["pkce.code.challenge.method"] == "S256" and (.[0].redirectUris | index("https://ci.example.invalid/*") != null) and (.[0].webOrigins | index("https://ci.example.invalid") != null)' <<< "${web_json}" >/dev/null
 jq -e 'length == 1 and .[0].publicClient == false and .[0].standardFlowEnabled == false and .[0].directAccessGrantsEnabled == false and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == true and .[0].clientAuthenticatorType == "client-secret"' <<< "${service_json}" >/dev/null
+jq -e 'length == 1 and .[0].publicClient == false and .[0].standardFlowEnabled == false and .[0].directAccessGrantsEnabled == true and .[0].implicitFlowEnabled == false and .[0].serviceAccountsEnabled == false and .[0].clientAuthenticatorType == "client-secret"' <<< "${broker_json}" >/dev/null
 
 api_uuid="$(jq -r '.[0].id' <<< "${api_json}")"
 mobile_uuid="$(jq -r '.[0].id' <<< "${mobile_json}")"
 web_uuid="$(jq -r '.[0].id' <<< "${web_json}")"
 service_uuid="$(jq -r '.[0].id' <<< "${service_json}")"
+broker_uuid="$(jq -r '.[0].id' <<< "${broker_json}")"
 
 scope_json="$(kcadm_get client-scopes -r ouros)"
 scope_uuid="$(jq -r '.[] | select(.name == "ci-api-audience") | .id' <<< "${scope_json}")"
@@ -167,11 +175,13 @@ mobile_scopes="$(kcadm_get "clients/${mobile_uuid}/default-client-scopes" -r our
 web_scopes="$(kcadm_get "clients/${web_uuid}/default-client-scopes" -r ouros)"
 service_scopes="$(kcadm_get "clients/${service_uuid}/default-client-scopes" -r ouros)"
 api_scopes="$(kcadm_get "clients/${api_uuid}/default-client-scopes" -r ouros)"
+broker_scopes="$(kcadm_get "clients/${broker_uuid}/default-client-scopes" -r ouros)"
 
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${mobile_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${web_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${service_scopes}" >/dev/null
 jq -e '.[] | select(.name == "ci-api-audience")' <<< "${api_scopes}" >/dev/null
+jq -e '.[] | select(.name == "ci-api-audience")' <<< "${broker_scopes}" >/dev/null
 
 echo "[integration] verifying Client Credentials service identity"
 service_secret="$(kcadm_get "clients/${service_uuid}/client-secret" -r ouros | jq -r '.value')"
@@ -191,10 +201,40 @@ service_payload="$(jwt_payload "${service_access_token}")"
 jq -e '(.sub | type) == "string" and (if (.aud | type) == "array" then (.aud | index("ci-api")) != null else .aud == "ci-api" end)' \
   <<< "${service_payload}" >/dev/null
 
+echo "[integration] verifying password-grant broker audience"
+kcadm_run create users -r ouros \
+  -s username=ci-user \
+  -s enabled=true \
+  -s email=ci-user@example.invalid \
+  -s emailVerified=true \
+  -s firstName=CI \
+  -s lastName=User \
+  -s 'requiredActions=[]' >/dev/null
+kcadm_run set-password -r ouros --username ci-user --new-password ci-user-password >/dev/null
+broker_secret="$(kcadm_get "clients/${broker_uuid}/client-secret" -r ouros | jq -r '.value')"
+[[ -n "${broker_secret}" && "${broker_secret}" != null ]] \
+  || { echo "[integration] password broker client secret missing" >&2; exit 1; }
+
+broker_token_json="$(curl -fsS \
+  -u "ci-password-broker:${broker_secret}" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'grant_type=password' \
+  -d 'username=ci-user' \
+  -d 'password=ci-user-password' \
+  -d 'scope=openid' \
+  "http://localhost:${HOST_PORT}/realms/ouros/protocol/openid-connect/token")"
+broker_access_token="$(jq -r '.access_token' <<< "${broker_token_json}")"
+[[ -n "${broker_access_token}" && "${broker_access_token}" != null ]] \
+  || { echo "[integration] password broker access token missing" >&2; exit 1; }
+
+broker_payload="$(jwt_payload "${broker_access_token}")"
+jq -e '(.azp == "ci-password-broker") and (if (.aud | type) == "array" then (.aud | index("ci-api")) != null else .aud == "ci-api" end)' \
+  <<< "${broker_payload}" >/dev/null
+
 echo "[integration] verifying idempotent reconciliation"
 docker exec "${KEYCLOAK_CONTAINER}" /bin/bash /opt/keycloak/iac/sync-clients.sh >/dev/null
 
 curl -fsS "http://localhost:${HOST_PORT}/realms/ouros/protocol/openid-connect/certs" \
   | jq -e '.keys | length > 0' >/dev/null
 
-echo "[integration] microservice, mobile, web and service IaC reconciliation passed"
+echo "[integration] microservice, mobile, web, service and password-broker IaC reconciliation passed"
