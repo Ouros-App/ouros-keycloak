@@ -297,7 +297,9 @@ A CI valida:
     │   └── ouros-auth-service.conf
     ├── resources/
     │   ├── keycloak-user-storage.conf
+    │   ├── ms-auth-service-broker.conf
     │   ├── ms-auth-service-internal.conf
+    │   ├── ms-ouros-audience-engine.conf
     │   └── ms-telemetry-dashboard-service.conf
     ├── examples/
     │   ├── microservice.conf.example
