@@ -234,7 +234,7 @@ grep -q 'keycloak-entrypoint.sh' Dockerfile || fail "Dockerfile must run the IaC
 validate_first_party_broker_contract() {
   local broker_file="iac/resources/ms-auth-service-broker.conf"
   local actual expected actual_sorted expected_sorted
-  expected="ms-spring-api|ms-telemetry-dashboard-service|ms-ai-server|ms-ai-server-mcp-exchange|ms-mcp-server-ouros-knowledge-codemode"
+  expected="ms-spring-api|ms-telemetry-dashboard-service|ms-ai-server|ms-ai-server-mcp-exchange|ms-mcp-server-ouros-knowledge-codemode|ms-ouros-audience-engine"
 
   [[ -f "${broker_file}" ]] || fail "${broker_file}: official first-party broker declaration is required"
   [[ "$(config_get "${broker_file}" CLIENT_TYPE)" == "password-broker" ]] \
