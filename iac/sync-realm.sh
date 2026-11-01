@@ -70,6 +70,10 @@ kcadm_run update "realms/${REALM}" \
 
 echo "[keycloak-iac] realm ${REALM} security settings reconciled"
 
+ensure_realm_role "farm_owner" "Farm owner user"
+ensure_realm_role "company_employee" "Company employee user"
+ensure_realm_role "admin" "Ouros administrator"
+
 smtp_host="${OUROS_SMTP_HOST:-}"
 if [[ -n "${smtp_host}" ]]; then
   smtp_port="${OUROS_SMTP_PORT:-587}"
